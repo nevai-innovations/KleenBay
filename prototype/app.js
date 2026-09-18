@@ -267,7 +267,7 @@ setTheme(readPref('theme-sky') || 'light'); // sky is the default look; charcoal
 addEventListener('scroll', () => $('.topbar').classList.toggle('scrolled', scrollY > 8), { passive: true });
 
 /* ---------------------------------------------------------------- routing */
-const ROUTES = ['board', 'new', 'job', 'summary', 'history', 'find', 'activity', 'team', 'services', 'more'];
+const ROUTES = ['board', 'stage', 'new', 'job', 'summary', 'history', 'find', 'activity', 'team', 'services', 'more'];
 const OWNER_ONLY = ['summary', 'history', 'team', 'services'];
 function route() {
   const m = (location.hash || '#/board').match(/^#\/(\w+)(?:\/(.+))?/);
@@ -277,7 +277,7 @@ function route() {
 const TITLES = {
   board: ['Board', 'Live jobs'], new: ['Check in', 'New vehicle'], summary: ['Daily summary', 'Today'],
   history: ['History', 'Delivered today'], find: ['Find a car', 'Search by number'], activity: ['Activity', 'Updates from your team'],
-  team: ['Team', 'Who can sign in'], services: ['Wash types', 'What you offer and charge'], more: ['More', ''], job: ['Job', 'Vehicle detail'],
+  team: ['Team', 'Who can sign in'], services: ['Wash types', 'What you offer and charge'], more: ['More', ''], job: ['Job', 'Vehicle detail'], stage: ['Stage', ''],
 };
 
 function render() {
@@ -292,7 +292,7 @@ function render() {
   const [title, meta] = TITLES[name];
   $('#viewTitle').textContent = title;
   $('#viewMeta').textContent = name === 'more' ? `${session.name} · ${isOwner() ? 'Owner' : 'Employee'}` : meta;
-  const painters = { board: paintBoard, new: paintNew, summary: paintSummary, history: paintHistory, find: paintFind, activity: paintActivity, team: paintTeam, services: paintServices, more: paintMore, job: () => paintJob(id) };
+  const painters = { stage: () => paintStage(id), board: paintBoard, new: paintNew, summary: paintSummary, history: paintHistory, find: paintFind, activity: paintActivity, team: paintTeam, services: paintServices, more: paintMore, job: () => paintJob(id) };
   painters[name]();
   view.classList.remove('view-in');
   void view.offsetWidth;
@@ -307,6 +307,7 @@ function refresh() {
   const { name, id } = route();
   const keep = (fn) => { const y = scrollY; fn(); scrollTo(0, y); };
   if (name === 'board') paintBoard();
+  else if (name === 'stage') keep(() => paintStage(id));
   else if (name === 'job') keep(() => paintJob(id));
   else if (name === 'summary') keep(paintSummary);
   else if (name === 'history') keep(paintHistory);
@@ -367,15 +368,6 @@ function paintBoard() {
   }).join('');
 
   const groupCounts = GROUPS.map((g) => ({ ...g, n: found.filter((j) => g.stages.includes(j.status)).length }));
-  const shown = ui.group === 'ALL' ? found : found.filter((j) => GROUPS.find((g) => g.id === ui.group).stages.includes(j.status));
-  const mobileList = ACTIVE.filter((st) => shown.some((j) => j.status === st)).map((st) => {
-    const list = shown.filter((j) => j.status === st).sort((a, b) => a.stageAt - b.stageAt);
-    return `<section class="col" data-drop="${st}" style="--stage:${STAGE[st].tone}">
-      <header class="col-head"><span class="dot"></span><b title="${STAGE[st].label}">${STAGE[st].col}</b><span class="n">${list.length}</span></header>
-      <div class="stagger">${list.map(jobCard).join('')}</div>
-    </section>`;
-  }).join('') || `<div class="empty">${ui.query ? 'No vehicle matches that search.' : 'Nothing here right now.'}</div>`;
-
   view.innerHTML = `
     <div class="stat-strip">
       <div class="stat"><span>In the bay</span><b>${act.length}</b><small>${jobs.length} received today</small></div>
@@ -387,13 +379,104 @@ function paintBoard() {
     ${ui.query ? `<div class="board-bar"><span class="chip accent">Search: ${esc(ui.query)}</span><button class="btn ghost" data-clear-search>Clear</button></div>` : ''}
     <div class="only-desktop columns">${desktopCols}</div>
     <div class="only-mobile-block">
-      <div class="seg" role="tablist" style="--stage:${STAGE.WASHING.tone}">
-        <button role="tab" aria-selected="${ui.group === 'ALL'}" data-group="ALL" style="--stage:var(--accent)"><b>${found.length}</b>All</button>
-        ${groupCounts.map((g) => `<button role="tab" aria-selected="${ui.group === g.id}" data-group="${g.id}" style="--stage:${STAGE[g.stages[0]].tone}"><b>${g.n}</b>${g.label}</button>`).join('')}
-      </div>
-      <div class="grid" style="margin-top:var(--s4)">${mobileList}</div>
+      <nav class="seg" aria-label="Open a group of cars">
+        <a href="#/stage/ALL" aria-current="page" style="--stage:var(--accent)"><b>${found.length}</b>All</a>
+        ${groupCounts.map((g) => `<a href="#/stage/group-${g.id}" style="--stage:${STAGE[g.stages[0]].tone}"><b>${g.n}</b>${g.label}</a>`).join('')}
+      </nav>
+      ${stageMap(found)}
+      <p class="map-hint">Tap a stage to see its cars · press and hold a car to move it</p>
     </div>`;
 
+  if (ui.flash) {
+    const el = $(`[data-card="${ui.flash}"]`);
+    ui.flash = null;
+    el?.classList.add('flash');
+  }
+}
+
+/* ---------------------------------------------------------------- move window (press and hold a car) */
+function openMoveSheet(j) {
+  const cur = FLOW.indexOf(j.status);
+  const rows = FLOW.map((st, i) => {
+    const rule = dropRule(j, st);
+    const label = rule === 'current' ? 'Here now' : rule === 'next' ? (st === 'DELIVERED' ? 'Hand over' : 'Move here') : rule === 'back' ? 'Move back' : 'One step at a time';
+    return `<button class="move-row is-${rule}" style="--stage:${STAGE[st].tone}" ${rule === 'next' || rule === 'back' ? `data-move="${j.id}|${st}"` : 'disabled'}>
+      <span class="move-step">${i + 1}</span><span class="move-name">${STAGE[st].label}</span><span class="move-tag">${label}</span></button>`;
+  }).join('');
+  openSheet(`<h2>Move ${esc(fmtPlate(j.plate))}</h2>
+    <p class="muted">${esc(carName(j) || 'Vehicle')} · now in <b>${STAGE[j.status].label}</b></p>
+    <div class="move-list" role="list">${rows}</div>
+    <div class="sheet-actions"><button class="btn" data-close>Cancel</button><button class="btn" data-open-job="${j.id}">Open details</button></div>`);
+  if (cur >= 0) navigator.vibrate?.(8);
+}
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-move],[data-open-job]');
+  if (!t) return;
+  if (t.dataset.openJob) { closeSheet(); location.hash = `#/job/${t.dataset.openJob}`; return; }
+  const [id, st] = t.dataset.move.split('|');
+  const j = byId(id);
+  closeSheet();
+  const rule = dropRule(j, st);
+  if (rule === 'next') advance(id);        // hand-over still asks how the customer paid
+  else if (rule === 'back') stepBack(id);
+});
+
+/* ---------------------------------------------------------------- stage map (phone board) */
+// Snake layout: Received → Started ↓ Washing → Washed ↓ Ready
+const ARROW = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg>';
+function stageTile(st, list) {
+  const late = list.filter(isLate).length;
+  const oldest = list.length ? Math.max(...list.map((j) => Date.now() - j.stageAt)) : 0;
+  const sub = late ? `<span class="tile-late">${late} late</span>`
+    : list.length ? `<span>longest ${fmtAge(oldest)}</span>` : '<span>empty</span>';
+  return `<a class="stage-tile${list.length ? '' : ' is-empty'}${late ? ' has-late' : ''}" href="#/stage/${st}" data-drop="${st}" style="--stage:${STAGE[st].tone}"
+      aria-label="${STAGE[st].label}: ${list.length} car${list.length === 1 ? '' : 's'}${late ? `, ${late} late` : ''}">
+    <b>${list.length}</b><strong>${STAGE[st].col}</strong>${sub}</a>`;
+}
+function stageMap(found) {
+  const at = (st) => found.filter((j) => j.status === st);
+  return `<div class="stage-map">
+    ${stageTile('RECEIVED', at('RECEIVED'))}
+    <span class="flow-arrow a-to-started">${ARROW}</span>
+    ${stageTile('WASH_STARTED', at('WASH_STARTED'))}
+    <span class="flow-arrow a-to-washing">${ARROW}</span>
+    ${stageTile('WASH_COMPLETE', at('WASH_COMPLETE'))}
+    <span class="flow-arrow a-to-washed">${ARROW}</span>
+    ${stageTile('WASHING', at('WASHING'))}
+    <span class="flow-arrow a-to-ready">${ARROW}</span>
+    ${stageTile('READY_FOR_DELIVERY', at('READY_FOR_DELIVERY'))}
+  </div>`;
+}
+
+/* ---------------------------------------------------------------- stage list (tap a tile) */
+function stageKeyInfo(key) {
+  // "group-WASHING" is the Waiting / Washing / Ready group; plain "WASHING" is the single stage
+  if (key === 'ALL') return { label: 'All cars', stages: ACTIVE };
+  if (key.startsWith('group-')) {
+    const g = GROUPS.find((x) => x.id === key.slice(6));
+    return g ? { label: g.label, stages: g.stages } : null;
+  }
+  return STAGE[key] ? { label: STAGE[key].label, stages: [key] } : null;
+}
+function paintStage(key) {
+  const info = stageKeyInfo(key);
+  if (!info) { location.hash = '#/board'; return; }
+  const found = activeJobs().filter((j) => matches(j, ui.query));
+  const total = found.filter((j) => info.stages.includes(j.status)).length;
+  $('#viewTitle').textContent = info.label;
+  $('#viewMeta').textContent = `${total} car${total === 1 ? '' : 's'}`;
+  const sections = info.stages.map((st) => {
+    const list = found.filter((j) => j.status === st).sort((a, b) => a.stageAt - b.stageAt);
+    if (!list.length && info.stages.length > 1) return '';
+    return `<section class="col" data-drop="${st}" style="--stage:${STAGE[st].tone}">
+      ${info.stages.length > 1 ? `<header class="col-head"><span class="dot"></span><b title="${STAGE[st].label}">${STAGE[st].col}</b><span class="n">${list.length}</span></header>` : ''}
+      <div class="stagger">${list.map(jobCard).join('') || `<div class="empty">No cars in ${STAGE[st].label.toLowerCase()} right now.</div>`}</div>
+    </section>`;
+  }).join('') || '<div class="empty">No cars here right now.</div>';
+  view.innerHTML = `
+    <div class="board-bar"><a class="btn ghost" href="#/board">← Board</a><span class="stage-count">${total} in ${esc(info.label.toLowerCase())}</span></div>
+    <div class="grid">${sections}</div>
+    ${total ? '<p class="map-hint">Press and hold a car to move it to another stage</p>' : ''}`;
   if (ui.flash) {
     const el = $(`[data-card="${ui.flash}"]`);
     ui.flash = null;
@@ -1029,7 +1112,7 @@ const TABS = {
 
 function paintNav(current) {
   const role = session.role;
-  const active = (n) => n === current || (current === 'job' && n === 'board');
+  const active = (n) => n === current || (['job', 'stage'].includes(current) && n === 'board');
   const unread = unreadCount();
   const badge = (n) => (n === 'activity' && unread ? `<i class="nav-badge" aria-label="${unread} new">${unread > 9 ? '9+' : unread}</i>` : '');
   $('#railNav').innerHTML = NAV[role].map(([n, label]) =>
@@ -1354,7 +1437,7 @@ const dropRule = (j, target) => {
 const dropClass = (j, t) => ({ current: '', next: 'drop-ok', back: 'drop-ok', no: 'drop-no' }[dropRule(j, t)]);
 
 document.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0 || drag.active || !['board', 'find'].includes(route().name)) return;
+  if (e.button !== 0 || drag.active || !['board', 'stage', 'find'].includes(route().name)) return;
   const card = e.target.closest('.job');
   if (!card || e.target.closest('.act')) return;
   const p = { id: card.dataset.card, el: card, x: e.clientX, y: e.clientY, pointerId: e.pointerId, type: e.pointerType, timer: null };
@@ -1386,19 +1469,19 @@ function startDrag(p, x, y) {
   let ghost, dx, dy;
   if (p.type === 'mouse') {
     ghost = p.el.cloneNode(true);
-    ghost.classList.add('ghost');
+    ghost.classList.add('drag-ghost');
     ghost.style.width = `${r.width}px`;
     dx = p.x - r.left; dy = p.y - r.top;
   } else {
     ghost = document.createElement('div');
-    ghost.className = 'ghost ghost-chip';
+    ghost.className = 'drag-ghost drag-ghost-chip';
     ghost.style.setProperty('--stage', STAGE[j.status].tone);
     ghost.textContent = fmtPlate(j.plate);
     document.body.appendChild(ghost);
     dx = ghost.offsetWidth / 2; dy = ghost.offsetHeight + 56;
   }
   document.body.appendChild(ghost);
-  drag.active = { ...p, job: j, ghost, dx, dy, over: null };
+  drag.active = { ...p, job: j, ghost, dx, dy, over: null, travel: 0 };
   p.el.classList.add('drag-src');
   document.body.classList.add('dragging');
   $('#toast').hidden = true;
@@ -1415,6 +1498,7 @@ function startDrag(p, x, y) {
 }
 function moveDrag(x, y) {
   const d = drag.active;
+  d.travel = Math.max(d.travel, Math.hypot(x - d.x, y - d.y));
   d.ghost.style.transform = `translate(${x - d.dx}px, ${y - d.dy}px) rotate(1.5deg)`;
   const target = document.elementFromPoint(x, y)?.closest('[data-drop]') || null;
   if (d.over !== target) {
@@ -1425,10 +1509,13 @@ function moveDrag(x, y) {
 }
 function endDrag(x, y) {
   moveDrag(x, y);
-  const { job, over } = drag.active;
+  const { job, over, travel, type } = drag.active;
   const target = over?.dataset.drop;
   cleanupDrag();
   drag.muteClickUntil = Date.now() + 500;
+  // pressed and held, then let go without really dragging: offer the stages as big buttons instead
+  // (the finger is still over the car's own stage list, so ignore that as a drop target)
+  if (type !== 'mouse' && travel < 14) return openMoveSheet(job);
   if (!target) return;
   const rule = dropRule(job, target);
   if (rule === 'next') advance(job.id);
