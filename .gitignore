@@ -1,0 +1,23 @@
+node_modules/
+dist/
+coverage/
+.vite/
+*.log
+*.tsbuildinfo
+
+# Environment files — never commit real secrets
+.env
+.env.*
+!.env.example
+
+# Generated code
+apps/api/src/generated/
+
+# Test artifacts
+playwright-report/
+test-results/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
