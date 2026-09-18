@@ -705,3 +705,29 @@ body:not(.authed) .shell,body:not(.authed) .tabbar{display:none}
 
 /* wordmark: "Kleen" in the text colour, "Bay" in brand blue */
 .wm-bay{color:var(--accent)}
+
+/* =========================================================================
+   Phone layout for staff: one-row tab bar, compact figures, cars first
+   ========================================================================= */
+@media(max-width:1099px){
+  /* bottom bar: any number of items share one row equally */
+  .tabbar{display:flex;align-items:center;gap:2px}
+  .tabbar a{flex:1 1 0;min-width:0;padding:6px 0;min-height:58px}
+  .tabbar a span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tab-cta-dot{width:40px;height:40px}
+}
+@media(max-width:640px){
+  /* four figures in one compact row, so the car list starts above the fold */
+  .stat-strip{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-bottom:var(--s3)}
+  .stat{display:flex;flex-direction:column-reverse;align-items:center;justify-content:center;gap:2px;padding:10px 4px;border-radius:var(--r-md);text-align:center}
+  .stat b{margin:0;font-size:22px;line-height:1.1}
+  .stat span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;letter-spacing:.04em}
+  .stat small{display:none}
+  .stat.is-money b{font-size:16px}
+  main{padding-top:var(--s2)}
+}
+@media(max-width:1099px){
+  /* every tab is the same height and labels sit on one baseline, even beside the raised Check-in button */
+  .tabbar{align-items:stretch}
+  .tabbar a{align-content:end;row-gap:4px}
+}
