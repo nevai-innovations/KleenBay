@@ -12,6 +12,12 @@ const TYPES = {
 };
 const FILES = new Set(['index.html', 'app.css', 'app.js', 'legacy.html']);
 
+// Send the same security headers as production (vercel.json) so CSP problems show up locally.
+const vercel = JSON.parse(await readFile(new URL('../vercel.json', import.meta.url), 'utf8'));
+const SECURITY_HEADERS = Object.fromEntries(
+  (vercel.headers?.find((h) => h.source === '/(.*)')?.headers ?? []).map(({ key, value }) => [key.toLowerCase(), value]),
+);
+
 createServer(async (req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405).end();
@@ -26,9 +32,9 @@ createServer(async (req, res) => {
   const ext = name.slice(name.lastIndexOf('.'));
   const body = await readFile(new URL(`./${name}`, import.meta.url));
   res.writeHead(200, {
+    ...SECURITY_HEADERS,
     'content-type': TYPES[ext] ?? 'application/octet-stream',
     'cache-control': 'no-store',
-    'x-content-type-options': 'nosniff',
   });
   res.end(req.method === 'HEAD' ? undefined : body);
 }).listen(PORT, '127.0.0.1', () => {

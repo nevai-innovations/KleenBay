@@ -988,15 +988,20 @@ function countUp(root) {
     const end = Number(el.dataset.count);
     const money = el.dataset.money === '1';
     if (!end) return;
+    const final = el.textContent;
+    let done = false;
     const t0 = performance.now();
     const tick = (now) => {
+      if (done) return;
       const k = Math.min(1, (now - t0) / 650);
       const v = Math.round(end * (1 - (1 - k) ** 3));
       el.textContent = money ? inr(v) : v.toLocaleString('en-IN');
-      if (k < 1) requestAnimationFrame(tick);
+      if (k < 1) requestAnimationFrame(tick); else done = true;
     };
     el.textContent = money ? inr(0) : '0';
     requestAnimationFrame(tick);
+    // Background tabs, printing and screenshots may never run animation frames: always land on the real figure.
+    setTimeout(() => { done = true; el.textContent = final; }, 900);
   });
 }
 

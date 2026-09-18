@@ -21,3 +21,7 @@ test-results/
 .DS_Store
 Thumbs.db
 .idea/
+
+
+# Vercel CLI project link (local only)
+.vercel
