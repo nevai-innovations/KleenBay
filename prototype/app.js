@@ -1485,9 +1485,22 @@ function startDrag(p, x, y) {
   p.el.classList.add('drag-src');
   document.body.classList.add('dragging');
   $('#toast').hidden = true;
-  const hint = { current: 'current', next: 'move here', back: 'move back', no: 'not allowed' };
-  $('#tray').innerHTML = `<div class="tray-title">Drop ${esc(fmtPlate(j.plate))} on a stage</div><div class="tray-grid">${FLOW.map((s) =>
-    `<div class="drop ${dropClass(j, s)}" data-drop="${s}" style="--stage:${STAGE[s].tone}"><b>${STAGE[s].short}</b>${hint[dropRule(j, s)]}</div>`).join('')}</div>`;
+  if (p.type !== 'mouse') {
+    // Touch: a car can only go one step either way, so show just those two targets, as big as possible.
+    // Back sits on the left and forward on the right, the direction the car travels.
+    const i = FLOW.indexOf(j.status);
+    const back = i > 0 ? FLOW[i - 1] : null, next = FLOW[i + 1];
+    const zone = (st, dir) => `<div class="big-drop ${dir}" data-drop="${st}" style="--stage:${STAGE[st].tone}">
+        ${ARROW}<small>${dir === 'back' ? 'Move back to' : st === 'DELIVERED' ? 'Hand over' : 'Move to'}</small><b>${STAGE[st].label}</b></div>`;
+    $('#tray').innerHTML = `<div class="tray-title">Drag onto a stage · let go anywhere else to cancel</div>
+      <div class="big-drops${back ? '' : ' single'}">${back ? zone(back, 'back') : ''}${zone(next, 'next')}</div>`;
+    $('#tray').classList.add('big');
+  } else {
+    const hint = { current: 'current', next: 'move here', back: 'move back', no: 'not allowed' };
+    $('#tray').innerHTML = `<div class="tray-title">Drop ${esc(fmtPlate(j.plate))} on a stage</div><div class="tray-grid">${FLOW.map((s) =>
+      `<div class="drop ${dropClass(j, s)}" data-drop="${s}" style="--stage:${STAGE[s].tone}"><b>${STAGE[s].short}</b>${hint[dropRule(j, s)]}</div>`).join('')}</div>`;
+    $('#tray').classList.remove('big');
+  }
   $('#tray').hidden = false;
   $$('.col[data-drop]').forEach((c) => {
     const cls = dropClass(j, c.dataset.drop); // the current stage gets no class
@@ -1505,6 +1518,15 @@ function moveDrag(x, y) {
     d.over?.classList.remove('over');
     target?.classList.add('over');
     d.over = target;
+    // The finger hides the target, so the floating label above it says where the car will go.
+    if (d.type !== 'mouse') {
+      const dest = target?.classList.contains('big-drop') ? target.dataset.drop : null;
+      d.ghost.textContent = dest ? `${fmtPlate(d.job.plate)} → ${STAGE[dest].col}` : fmtPlate(d.job.plate);
+      d.ghost.classList.toggle('is-over', !!dest);
+      d.dx = d.ghost.offsetWidth / 2; // stay centred above the finger as the label grows
+      d.ghost.style.transform = `translate(${x - d.dx}px, ${y - d.dy}px) rotate(1.5deg)`;
+      if (dest) navigator.vibrate?.(10);
+    }
   }
 }
 function endDrag(x, y) {
@@ -1530,6 +1552,7 @@ function cleanupDrag() {
   document.body.classList.remove('dragging');
   $('#tray').hidden = true;
   $('#tray').innerHTML = '';
+  $('#tray').classList.remove('big');
   $$('.col[data-drop]').forEach((c) => c.classList.remove('drop-ok', 'drop-no', 'over'));
   drag.active = null;
 }

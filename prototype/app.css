@@ -798,3 +798,24 @@ body:not(.authed) .shell,body:not(.authed) .tabbar{display:none}
 .move-row:disabled{cursor:default}
 .move-row.is-no{opacity:.45}
 .move-row:not(:disabled):active{transform:scale(.99)}
+
+/* =========================================================================
+   Touch drag: two big drop zones (back on the left, forward on the right)
+   ========================================================================= */
+.tray.big{padding:var(--s3) var(--s3) calc(var(--s3) + env(safe-area-inset-bottom));border-radius:var(--r-xl) var(--r-xl) 0 0}
+.tray.big .tray-title{font-size:14px;font-weight:600;color:var(--text-2);margin-bottom:var(--s3)}
+.big-drops{display:grid;grid-template-columns:2fr 3fr;gap:10px;height:min(36vh,300px)}
+.big-drops.single{grid-template-columns:1fr}
+.big-drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:var(--s3);
+  border:2.5px dashed color-mix(in srgb,var(--stage) 70%,transparent);border-radius:var(--r-xl);
+  background:color-mix(in srgb,var(--stage) 12%,var(--surface-2));color:var(--stage);text-align:center;
+  transition:transform var(--fast) var(--ease),background var(--fast),color var(--fast)}
+.big-drop svg{width:40px;height:40px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.big-drop.back svg{transform:rotate(180deg)}
+.big-drop small{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2)}
+.big-drop b{font-size:21px;line-height:1.2;font-weight:700}
+.big-drop.next{border-style:solid}
+.big-drop.over{background:var(--stage);color:#fff;border-style:solid;border-color:var(--stage);transform:scale(1.03);box-shadow:0 14px 30px -12px var(--stage)}
+.big-drop.over small{color:rgb(255 255 255 / .85)}
+.drag-ghost-chip{font-weight:600;transition:background var(--fast),color var(--fast)}
+.drag-ghost-chip.is-over{background:var(--stage);border-color:var(--stage);color:#fff}
