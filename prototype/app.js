@@ -267,7 +267,7 @@ setTheme(readPref('theme-sky') || 'light'); // sky is the default look; charcoal
 addEventListener('scroll', () => $('.topbar').classList.toggle('scrolled', scrollY > 8), { passive: true });
 
 /* ---------------------------------------------------------------- routing */
-const ROUTES = ['board', 'stage', 'new', 'job', 'summary', 'history', 'find', 'activity', 'team', 'services', 'more'];
+const ROUTES = ['track', 'board', 'stage', 'new', 'job', 'summary', 'history', 'find', 'activity', 'team', 'services', 'more'];
 const OWNER_ONLY = ['summary', 'history', 'team', 'services'];
 function route() {
   const m = (location.hash || '#/board').match(/^#\/(\w+)(?:\/(.+))?/);
@@ -280,8 +280,114 @@ const TITLES = {
   team: ['Team', 'Who can sign in'], services: ['Wash types', 'What you offer and charge'], more: ['More', ''], job: ['Job', 'Vehicle detail'], stage: ['Stage', ''],
 };
 
+/* ---------------------------------------------------------------- customer tracking page
+   A public link the customer opens on their own phone: no sign-in, no app.
+   Live while the data is in this browser; a link opened elsewhere carries a snapshot
+   in the URL instead (the real app will serve this from the server). */
+const LOYALTY = { target: 6, reward: 'a free Basic Wash' };
+const CUSTOMER_STEPS = ['RECEIVED', 'WASH_STARTED', 'WASHING', 'WASH_COMPLETE', 'READY_FOR_DELIVERY'];
+
+const b64 = {
+  to: (obj) => btoa(unescape(encodeURIComponent(JSON.stringify(obj)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''),
+  from: (str) => JSON.parse(decodeURIComponent(escape(atob(str.replace(/-/g, '+').replace(/_/g, '/')))))
+};
+// Visits for the stamp card: this vehicle's past washes at this centre.
+const stampCount = (plate) => visits(plate);
+function trackSnapshot(j) {
+  return {
+    p: j.plate, c: carName(j), n: j.customer, s: svc(j.service).name, pr: jobPrice(j),
+    st: j.status, r: j.receivedAt, e: j.expectedAt, sa: j.stageAt, v: stampCount(j.plate), b: BUSINESS, ph: OWNER.phone,
+  };
+}
+function trackUrl(j) {
+  const base = `${location.origin}${location.pathname}`;
+  return `${base}#/track/${j.id}~${b64.to(trackSnapshot(j))}`;
+}
+function trackData(key) {
+  const [id, snap] = String(key).split('~');
+  const j = byId(id);
+  if (j) return { live: true, j, d: trackSnapshot(j), photos: j.photos };
+  if (!snap) return null;
+  try { return { live: false, j: null, d: b64.from(snap), photos: [] }; } catch { return null; }
+}
+
+function paintTrack(key) {
+  // nothing from the staff app belongs on a customer's screen
+  $('#toast').hidden = true;
+  $('#sheet').innerHTML = '';
+  $('#tray').hidden = true;
+  $('#lightbox').innerHTML = '';
+  const data = trackData(key);
+  document.title = `${data ? fmtPlate(data.d.p) : 'Vehicle'} — ${BUSINESS}`;
+  if (!data) {
+    $('#auth').innerHTML = `<div class="track"><div class="track-card"><h1>Link not found</h1>
+      <p class="muted">Ask the car wash to send the link again.</p></div></div>`;
+    return;
+  }
+  const d = data.d;
+  const now = Date.now();
+  const done = CUSTOMER_STEPS.indexOf(d.st) >= 0 ? CUSTOMER_STEPS.indexOf(d.st) : CUSTOMER_STEPS.length;
+  const ready = d.st === 'READY_FOR_DELIVERY';
+  const delivered = d.st === 'DELIVERED';
+  const steps = CUSTOMER_STEPS.map((st, i) => {
+    const state = delivered || i < done ? 'done' : i === done ? 'now' : '';
+    const label = { RECEIVED: 'Received', WASH_STARTED: 'Wash started', WASHING: 'Washing', WASH_COMPLETE: 'Wash complete', READY_FOR_DELIVERY: 'Ready for pickup' }[st];
+    return `<li class="${state}" style="--stage:${STAGE[st].tone}"><span class="pin"></span><span>${label}</span></li>`;
+  }).join('');
+  const before = data.photos.filter((p) => p.kind === 'BEFORE');
+  const after = data.photos.filter((p) => p.kind === 'AFTER');
+  const shots = (list, title) => list.length ? `<div><h3>${title}</h3><div class="track-shots">${list.map((p) =>
+    `<img src="${p.url}" alt="${title} photo" loading="lazy">`).join('')}</div></div>` : '';
+  // a full card means the next wash is free; after claiming it the count starts again
+  const filled = d.v > 0 && d.v % LOYALTY.target === 0 ? LOYALTY.target : d.v % LOYALTY.target;
+  const left = LOYALTY.target - filled;
+  const stamps = Array.from({ length: LOYALTY.target }, (_, i) => `<span class="stamp${i < filled ? ' on' : ''}"></span>`).join('');
+  const bookText = `Hi ${d.b}, I would like to book a wash.%0AVehicle: ${fmtPlate(d.p)}${d.c ? ` (${d.c})` : ''}%0AService: ${d.s}%0AWhen: `;
+  const status = delivered ? 'Handed over — thank you!' : ready ? 'Your vehicle is ready for pickup' : 'Your vehicle is being washed';
+
+  $('#auth').innerHTML = `<div class="track">
+    <header class="track-top">
+      <span class="mark-glyph" aria-hidden="true">${GLYPH}</span>
+      <div><b>${esc(d.b)}</b><small>Live wash status</small></div>
+    </header>
+
+    <section class="track-card hero-card ${ready ? 'is-ready' : ''}">
+      <p class="track-status">${status}</p>
+      <div class="plate">${esc(fmtPlate(d.p))}</div>
+      <p class="muted">${esc(d.c || 'Vehicle')} · ${esc(d.s)}</p>
+      ${!delivered && !ready && d.e ? `<p class="track-eta">Ready by about <b>${fmtTime(d.e)}</b></p>` : ''}
+      ${ready ? '<p class="track-eta ok">Please collect at the counter</p>' : ''}
+      <ol class="track-steps">${steps}</ol>
+      ${data.live ? `<p class="dim track-live">Updated ${fmtAge(now - d.sa)} ago</p>` : '<p class="dim track-live">Snapshot from when this link was sent</p>'}
+    </section>
+
+    ${before.length || after.length ? `<section class="track-card"><h2>Photos of your vehicle</h2>
+      <div class="track-photo-cols">${shots(before, 'Before')}${shots(after, 'After')}</div></section>` : ''}
+
+    <section class="track-card">
+      <h2>Your wash card</h2>
+      <div class="stamp-row">${stamps}</div>
+      <p class="muted">${left === 0 ? `Card full — your next wash is ${LOYALTY.reward}.` : `${d.v} wash${d.v === 1 ? '' : 'es'} so far · ${left} more for ${LOYALTY.reward}.`}</p>
+    </section>
+
+    <section class="track-card">
+      <h2>Bill</h2>
+      <div class="track-bill"><span>${esc(d.s)}</span><b class="mono">${inr(d.pr)}</b></div>
+      <p class="dim">Pay at the counter by cash, UPI or card.</p>
+    </section>
+
+    <div class="track-actions">
+      <a class="btn primary lg block" href="https://wa.me/91${d.ph}?text=${bookText}" target="_blank" rel="noopener noreferrer">Book next wash on WhatsApp</a>
+      <a class="btn lg block" href="tel:+91${d.ph}">Call the car wash</a>
+    </div>
+    <p class="track-foot">Powered by KleenBay · no app needed</p>
+  </div>`;
+}
+
 function render() {
   saveDb(); // any change made before a screen change must reach the other portals
+  const pub = route();
+  if (pub.name === 'track') { document.body.classList.remove('authed'); return paintTrack(pub.id); }
   document.body.classList.toggle('authed', !!session);
   if (!session) { $('#auth').innerHTML = ''; paintLogin(); return; }
   $('#auth').innerHTML = '';
@@ -524,7 +630,7 @@ function paintJob(id) {
       </div>
       <div class="quick">
         <a href="tel:+91${j.phone}">${ICON.phone}Call</a>
-        <a href="https://wa.me/91${j.phone}" target="_blank" rel="noopener noreferrer">${ICON.chat}WhatsApp</a>
+        <a href="https://wa.me/91${j.phone}?text=${encodeURIComponent(`Hi ${j.customer}, track your vehicle ${fmtPlate(j.plate)} live at ${BUSINESS}: ${trackUrl(j)}`)}" target="_blank" rel="noopener noreferrer">${ICON.chat}Send link</a>
         <button data-shot-add="${j.id}|${photoKind}">${ICON.camera}${photoKind === 'BEFORE' ? 'Before' : 'After'}</button>
       </div>
     </div>
