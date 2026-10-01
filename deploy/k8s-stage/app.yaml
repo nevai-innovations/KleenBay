@@ -93,7 +93,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: web
-          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-web@sha256:0e44e739505b26f556740156eb70766c9863d3bd92a5c8f7f148c4653594581b
+          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-web@sha256:77769e0300df63766b801abbd1ce38da696c47ac05d4826addc3e59cf97c113e
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80

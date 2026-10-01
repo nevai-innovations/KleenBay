@@ -38,6 +38,7 @@ describe('login screens', () => {
     const user = userEvent.setup();
     render(<App />);
     expect(await screen.findByRole('tab', { name: 'Owner Login' })).toHaveProperty('ariaSelected', 'true');
+    expect(document.querySelector('.login-brand img')?.getAttribute('src')).toBe('/kleenbay-monogram.png');
     await user.click(screen.getByRole('tab', { name: 'Employee Login' }));
     expect(screen.getByRole('textbox', { name: 'Mobile number' })).toBeTruthy();
     expect(screen.queryByRole('textbox', { name: 'Username / Email' })).toBeNull();
@@ -63,6 +64,9 @@ describe('login screens', () => {
     expect(screen.getByRole('button', { name: 'Verify' }).hasAttribute('disabled')).toBe(false);
     await user.click(screen.getByRole('button', { name: 'Verify' }));
     expect(await screen.findByRole('heading', { name: 'Board' })).toBeTruthy();
+    expect(document.querySelector('.rail .login-brand img')?.getAttribute('src')).toBe('/kleenbay-monogram.png');
+    expect(document.querySelector('.topbar .mobile-brand-art img')?.getAttribute('src')).toBe('/kleenbay-monogram.png');
+    expect(screen.queryByText('Sparkle Car Wash')).toBeNull();
     expect(screen.getByRole('button', { name: 'Check-in Vehicle' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Daily Summary' })).toBeNull();
     await waitFor(() => expect(requests.find((request) => request.path.endsWith('/auth/employee/verify-otp'))?.body?.code).toBe('123456'));
@@ -88,6 +92,9 @@ describe('owner catalog', () => {
     const user = userEvent.setup();
     render(<App />);
     const navigation = await screen.findByRole('navigation', { name: 'Owner sections' });
+    expect(document.querySelector('.rail .login-brand img')?.getAttribute('src')).toBe('/kleenbay-monogram.png');
+    expect(document.querySelector('.topbar .mobile-brand-art img')?.getAttribute('src')).toBe('/kleenbay-monogram.png');
+    expect(screen.queryByText('Sparkle Car Wash')).toBeNull();
     expect(within(navigation).getByRole('button', { name: 'Daily Summary' })).toBeTruthy();
     await user.click(within(navigation).getByRole('button', { name: 'Customers' }));
     expect(await screen.findByRole('button', { name: /Meera Nair/ })).toBeTruthy();

@@ -9,6 +9,14 @@ function Field({ label, ...props }: { label: string } & React.InputHTMLAttribute
   return <label className="field"><span>{label}</span><input className="input" {...props} /></label>;
 }
 
+function BrandLogo({ mobile = false }: { mobile?: boolean }) {
+  return <span className={`brand-art${mobile ? ' mobile-brand-art' : ''}`}><img src="/kleenbay-monogram.png" alt="" /></span>;
+}
+
+function Brand({ subtitle }: { subtitle?: string }) {
+  return <div className="login-brand"><BrandLogo /><span className="brand-copy"><strong>KleenBay</strong>{subtitle && <small>{subtitle}</small>}</span></div>;
+}
+
 function OtpBoxes({ code, onChange }: { code: string; onChange: (code: string) => void }) {
   return <div className="otp-digits">
     <input aria-label="Verification code" type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => onChange(event.target.value.replace(/\D/g, '').slice(0, 6))} autoFocus />
@@ -67,7 +75,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
 
   return <div className={`login-page${otpSent && mode === 'employee' ? ' is-verifying' : ''}`}>
     <div className="login-wrap">
-      <div className="login-brand"><span className="brand-mark">K</span><span><strong>KleenBay</strong><small>Car wash operations</small></span></div>
+      <Brand subtitle="Car wash operations" />
       <div className={`login-box${otpSent && mode === 'employee' ? ' is-verifying' : ''}`}>
         {otpSent && mode === 'employee' ? <div className="otp-view">
           <button type="button" className="otp-back" onClick={editMobile} aria-label="Back to mobile number" title="Back to mobile number"><ArrowLeft size={20} /></button>
@@ -145,11 +153,11 @@ function OwnerPortal({ session, onLogout }: { session: Session; onLogout: () => 
   const sectionTitle = navigation.find((item) => item.id === section)!.label;
 
   return <div className="shell">
-    <aside className="rail"><div className="login-brand"><span className="brand-mark">K</span><span><strong>KleenBay</strong><small>{session.organization.name}</small></span></div>
+    <aside className="rail"><Brand />
       <nav className="rail-nav" aria-label="Owner navigation">{navigation.map(({ id, label, icon: Icon }) => <button type="button" key={id} className={section === id ? 'active' : ''} onClick={() => setSection(id)}><Icon size={18} /><span>{label}</span></button>)}</nav>
       <div className="rail-foot"><span className="who-dot">{session.user.name.slice(0, 1)}</span><button className="text-action" onClick={onLogout}>Sign out</button></div>
     </aside>
-    <div className="frame"><header className="topbar"><div className="topbar-title"><h1>{sectionTitle}</h1><p>{section === 'summary' ? 'Today' : session.organization.name}</p></div><button className="btn ghost logout-mobile" onClick={onLogout}>Sign out</button></header>
+    <div className="frame"><header className="topbar"><div className="topbar-identity"><BrandLogo mobile /><div className="topbar-title"><h1>{sectionTitle}</h1>{section === 'summary' && <p>Today</p>}</div></div><button className="btn ghost logout-mobile" onClick={onLogout}>Sign out</button></header>
       <nav className="portal-tabs owner-tabs" aria-label="Owner sections">{navigation.map(({ id, label }) => <button type="button" key={id} className={section === id ? 'active' : ''} onClick={() => setSection(id)}>{label}</button>)}</nav>
       <main className="portal-main">{section === 'board' ? <BoardView session={session} /> : section === 'summary' ? <DailySummaryView /> : section === 'history' ? <HistoryView session={session} /> : section === 'employees' ? <><div className="section-head"><div><h2>Team</h2><p>Manage who can sign in and work on vehicles.</p></div><span className="count-chip">{employees.filter((employee) => employee.active).length} active</span></div>
         <div className="team-layout"><section className="panel team-list" aria-label="Employees"><div className="team-list-head"><strong>Employees</strong><span>{employees.length}</span></div>
@@ -165,8 +173,8 @@ function OwnerPortal({ session, onLogout }: { session: Session; onLogout: () => 
 function EmployeePortal({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [section, setSection] = useState<'board' | 'history'>('board');
   return <div className="shell">
-    <aside className="rail"><div className="login-brand"><span className="brand-mark">K</span><span><strong>KleenBay</strong><small>{session.organization.name}</small></span></div><nav className="rail-nav" aria-label="Employee navigation"><button className={section === 'board' ? 'active' : ''} onClick={() => setSection('board')}><Columns3 size={18} /><span>Board</span></button><button className={section === 'history' ? 'active' : ''} onClick={() => setSection('history')}><History size={18} /><span>History</span></button></nav><div className="rail-foot"><span className="who-dot">{session.user.name.slice(0, 1)}</span><button className="text-action" onClick={onLogout}>Sign out</button></div></aside>
-    <div className="frame"><header className="topbar"><div className="topbar-title"><h1>{section === 'board' ? 'Board' : 'History'}</h1><p>{session.organization.name}</p></div><button className="btn ghost logout-mobile" onClick={onLogout}>Sign out</button></header><nav className="portal-tabs" aria-label="Employee sections"><button className={section === 'board' ? 'active' : ''} onClick={() => setSection('board')}>Board</button><button className={section === 'history' ? 'active' : ''} onClick={() => setSection('history')}>History</button></nav><main className="portal-main">{section === 'board' ? <BoardView session={session} /> : <HistoryView session={session} />}</main></div>
+    <aside className="rail"><Brand /><nav className="rail-nav" aria-label="Employee navigation"><button className={section === 'board' ? 'active' : ''} onClick={() => setSection('board')}><Columns3 size={18} /><span>Board</span></button><button className={section === 'history' ? 'active' : ''} onClick={() => setSection('history')}><History size={18} /><span>History</span></button></nav><div className="rail-foot"><span className="who-dot">{session.user.name.slice(0, 1)}</span><button className="text-action" onClick={onLogout}>Sign out</button></div></aside>
+    <div className="frame"><header className="topbar"><div className="topbar-identity"><BrandLogo mobile /><div className="topbar-title"><h1>{section === 'board' ? 'Board' : 'History'}</h1></div></div><button className="btn ghost logout-mobile" onClick={onLogout}>Sign out</button></header><nav className="portal-tabs" aria-label="Employee sections"><button className={section === 'board' ? 'active' : ''} onClick={() => setSection('board')}>Board</button><button className={section === 'history' ? 'active' : ''} onClick={() => setSection('history')}>History</button></nav><main className="portal-main">{section === 'board' ? <BoardView session={session} /> : <HistoryView session={session} />}</main></div>
   </div>;
 }
 
