@@ -1,0 +1,531 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  OWNER
+  EMPLOYEE
+}
+
+enum VehicleType {
+  HATCHBACK
+  SEDAN
+  SUV
+  MUV
+  TWO_WHEELER
+  COMMERCIAL
+  OTHER
+}
+
+enum JobStage {
+  RECEIVED
+  WASHING
+  READY
+  HANDED_OVER
+}
+
+enum MessageEvent {
+  VEHICLE_RECEIVED
+  WASH_STARTED
+  VEHICLE_READY
+  VEHICLE_HANDED_OVER
+}
+
+enum MessageStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  CARD
+  BANK_TRANSFER
+  OTHER
+}
+
+enum InvoiceStatus {
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+}
+
+enum PhotoKind {
+  BEFORE
+  DURING
+  AFTER
+  DAMAGE
+}
+
+enum InspectionLocation {
+  FRONT
+  REAR
+  LEFT
+  RIGHT
+  INTERIOR
+  WINDSHIELD
+  WHEELS
+  OTHER
+}
+
+enum DamageType {
+  SCRATCH
+  DENT
+  CRACK
+  PAINT_DAMAGE
+  BROKEN_ITEM
+  INTERIOR_DAMAGE
+  OTHER
+}
+
+model Organization {
+  id            String    @id @default(cuid())
+  name          String
+  slug          String    @unique
+  currency      String    @default("INR")
+  timezone      String    @default("Asia/Kolkata")
+  nextJobNumber Int       @default(1)
+  nextInvoiceNumber Int   @default(1)
+  invoicePrefix String    @default("KB")
+  allowOutstanding Boolean @default(true)
+  employeeHandover Boolean @default(true)
+  sendHandoverMessage Boolean @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  branches      Branch[]
+  users         User[]
+  sessions      Session[]
+  otpChallenges OtpChallenge[]
+  auditLogs     AuditLog[]
+  customers     Customer[]
+  vehicles      Vehicle[]
+  services      Service[]
+  servicePrices ServicePrice[]
+  serviceBranches ServiceBranch[]
+  jobs          Job[]
+  jobStageHistory JobStageHistory[]
+  jobAssignments JobAssignment[]
+  messages      Message[]
+  invoices      Invoice[]
+  payments      Payment[]
+  inspections   VehicleInspection[]
+  damageItems   InspectionDamageItem[]
+  photos        Photo[]
+}
+
+model Branch {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  address        String?
+  phone          String?
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  users          User[]
+  servicePrices  ServicePrice[]
+  serviceBranches ServiceBranch[]
+  jobs           Job[]
+
+  @@unique([organizationId, name])
+  @@unique([id, organizationId])
+  @@index([organizationId, active])
+}
+
+model User {
+  id             String           @id @default(cuid())
+  organizationId String
+  branchId       String?
+  role           Role
+  name           String
+  username       String?
+  email          String?
+  passwordHash   String?
+  active         Boolean          @default(true)
+  lastLoginAt    DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  branch         Branch?          @relation(fields: [branchId, organizationId], references: [id, organizationId])
+  employee       EmployeeProfile?
+  sessions       Session[]
+  otpChallenges  OtpChallenge[]
+  auditLogs      AuditLog[]
+  checkedInJobs  Job[]             @relation("CheckedInBy")
+  handedOverJobs Job[]             @relation("HandedOverBy")
+  stageUpdates   JobStageHistory[]
+  assignments    JobAssignment[]  @relation("AssignedEmployee")
+  assignedJobs   JobAssignment[]  @relation("AssignedBy")
+  collectedPayments Payment[]
+  inspections    VehicleInspection[]
+  photos         Photo[]
+
+  @@unique([id, organizationId])
+  @@unique([organizationId, username])
+  @@unique([organizationId, email])
+  @@index([organizationId, role, active])
+}
+
+model EmployeeProfile {
+  userId         String   @id
+  organizationId String
+  mobile         String
+  createdAt      DateTime @default(now())
+  user           User     @relation(fields: [userId, organizationId], references: [id, organizationId])
+
+  @@unique([userId, organizationId])
+  @@unique([organizationId, mobile])
+  @@index([organizationId, mobile])
+}
+
+model Session {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  tokenHash      String       @unique
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  user           User         @relation(fields: [userId, organizationId], references: [id, organizationId])
+
+  @@index([organizationId, userId, expiresAt])
+}
+
+model OtpChallenge {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  codeHash       String
+  expiresAt      DateTime
+  attempts       Int          @default(0)
+  consumedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  user           User         @relation(fields: [userId, organizationId], references: [id, organizationId])
+
+  @@index([organizationId, userId, createdAt])
+}
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  actorUserId    String?
+  action         String
+  entityType     String
+  entityId       String
+  before         Json?
+  after          Json?
+  ipAddress      String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  actor          User?        @relation(fields: [actorUserId, organizationId], references: [id, organizationId])
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, entityType, entityId])
+}
+
+model Customer {
+  id              String       @id @default(cuid())
+  organizationId  String
+  name            String
+  mobile          String
+  alternateMobile String?
+  email           String?
+  notes           String?
+  tags            String[]     @default([])
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  vehicles        Vehicle[]
+  jobs            Job[]
+
+  @@unique([id, organizationId])
+  @@unique([organizationId, mobile])
+  @@index([organizationId, name])
+  @@index([organizationId, createdAt])
+}
+
+model Vehicle {
+  id                 String       @id @default(cuid())
+  organizationId     String
+  customerId         String
+  registrationNumber String
+  make               String
+  model              String
+  variant            String?
+  type               VehicleType
+  colour             String?
+  year               Int?
+  notes              String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  organization       Organization @relation(fields: [organizationId], references: [id])
+  customer           Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId])
+  jobs               Job[]
+
+  @@unique([id, organizationId])
+  @@unique([organizationId, registrationNumber])
+  @@index([organizationId, customerId])
+  @@index([organizationId, createdAt])
+}
+
+model Service {
+  id                String         @id @default(cuid())
+  organizationId    String
+  name              String
+  description       String?
+  category          String
+  basePricePaise    Int
+  estimatedMinutes  Int
+  taxRateBps        Int            @default(0)
+  active            Boolean        @default(true)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  organization      Organization   @relation(fields: [organizationId], references: [id])
+  prices            ServicePrice[]
+  branches          ServiceBranch[]
+  jobs              Job[]
+
+  @@unique([id, organizationId])
+  @@unique([organizationId, name])
+  @@index([organizationId, active])
+}
+
+model ServicePrice {
+  id             String       @id @default(cuid())
+  organizationId String
+  serviceId      String
+  branchId       String?
+  vehicleType    VehicleType
+  pricePaise     Int
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  service        Service      @relation(fields: [serviceId, organizationId], references: [id, organizationId])
+  branch         Branch?      @relation(fields: [branchId, organizationId], references: [id, organizationId])
+
+  @@unique([serviceId, vehicleType, branchId])
+  @@index([organizationId, branchId, vehicleType])
+}
+
+model ServiceBranch {
+  id             String       @id @default(cuid())
+  organizationId String
+  serviceId      String
+  branchId       String
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  service        Service      @relation(fields: [serviceId, organizationId], references: [id, organizationId])
+  branch         Branch       @relation(fields: [branchId, organizationId], references: [id, organizationId])
+
+  @@unique([serviceId, branchId])
+  @@index([organizationId, branchId, active])
+}
+
+model Job {
+  id             String       @id @default(cuid())
+  organizationId String
+  branchId       String
+  customerId     String
+  vehicleId      String
+  serviceId      String
+  number         Int
+  idempotencyKey String
+  serviceName    String
+  subtotalPaise  Int
+  taxPaise       Int
+  totalPaise     Int
+  status         JobStage     @default(RECEIVED)
+  checkedInAt    DateTime     @default(now())
+  checkedInById  String
+  stageAt        DateTime     @default(now())
+  expectedAt     DateTime
+  notes          String?
+  notify         Boolean      @default(true)
+  handedOverAt   DateTime?
+  handedOverById String?
+  handoverNotes  String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  branch         Branch       @relation(fields: [branchId, organizationId], references: [id, organizationId])
+  customer       Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId])
+  vehicle        Vehicle      @relation(fields: [vehicleId, organizationId], references: [id, organizationId])
+  service        Service      @relation(fields: [serviceId, organizationId], references: [id, organizationId])
+  checkedInBy    User         @relation("CheckedInBy", fields: [checkedInById, organizationId], references: [id, organizationId])
+  handedOverBy   User?        @relation("HandedOverBy", fields: [handedOverById, organizationId], references: [id, organizationId])
+  stages         JobStageHistory[]
+  assignments    JobAssignment[]
+  messages       Message[]
+  invoice        Invoice?
+  inspection     VehicleInspection?
+  photos         Photo[]
+
+  @@unique([id, organizationId])
+  @@unique([organizationId, number])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, branchId, status])
+  @@index([organizationId, checkedInAt])
+  @@index([organizationId, handedOverAt])
+  @@index([organizationId, vehicleId, checkedInAt])
+}
+
+model JobStageHistory {
+  id             String       @id @default(cuid())
+  organizationId String
+  jobId          String
+  fromStage      JobStage?
+  toStage        JobStage
+  actorUserId    String
+  note           String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  job            Job          @relation(fields: [jobId, organizationId], references: [id, organizationId])
+  actor          User         @relation(fields: [actorUserId, organizationId], references: [id, organizationId])
+
+  @@index([organizationId, jobId, createdAt])
+  @@index([organizationId, createdAt])
+}
+
+model JobAssignment {
+  id             String       @id @default(cuid())
+  organizationId String
+  jobId          String
+  employeeId     String
+  assignedById   String
+  role           String?
+  assignedAt     DateTime     @default(now())
+  removedAt      DateTime?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  job            Job          @relation(fields: [jobId, organizationId], references: [id, organizationId])
+  employee       User         @relation("AssignedEmployee", fields: [employeeId, organizationId], references: [id, organizationId])
+  assignedBy     User         @relation("AssignedBy", fields: [assignedById, organizationId], references: [id, organizationId])
+
+  @@index([organizationId, jobId, removedAt])
+  @@index([organizationId, employeeId, assignedAt])
+}
+
+model Message {
+  id                String        @id @default(cuid())
+  organizationId    String
+  jobId             String
+  event             MessageEvent
+  recipient         String
+  renderedText      String
+  status            MessageStatus @default(PENDING)
+  attempts          Int           @default(0)
+  providerMessageId String?
+  sentAt            DateTime?
+  failedAt          DateTime?
+  failureReason     String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  organization      Organization  @relation(fields: [organizationId], references: [id])
+  job               Job           @relation(fields: [jobId, organizationId], references: [id, organizationId])
+
+  @@unique([jobId, event])
+  @@index([organizationId, status, createdAt])
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  organizationId String
+  jobId          String        @unique
+  invoiceNumber  String
+  subtotalPaise  Int
+  taxPaise       Int
+  totalPaise     Int
+  status         InvoiceStatus @default(ISSUED)
+  issuedAt       DateTime      @default(now())
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  job            Job           @relation(fields: [jobId, organizationId], references: [id, organizationId])
+  payments       Payment[]
+
+  @@unique([id, organizationId])
+  @@unique([jobId, organizationId])
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId, issuedAt])
+}
+
+model Payment {
+  id             String        @id @default(cuid())
+  organizationId String
+  invoiceId      String
+  idempotencyKey String
+  amountPaise    Int
+  method         PaymentMethod
+  reference      String?
+  notes          String?
+  collectedById  String
+  createdAt      DateTime      @default(now())
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  invoice        Invoice       @relation(fields: [invoiceId, organizationId], references: [id, organizationId])
+  collectedBy    User          @relation(fields: [collectedById, organizationId], references: [id, organizationId])
+
+  @@index([organizationId, invoiceId, createdAt])
+  @@index([organizationId, createdAt])
+  @@unique([organizationId, idempotencyKey])
+}
+
+model VehicleInspection {
+  id             String       @id @default(cuid())
+  organizationId String
+  jobId          String       @unique
+  recordedById   String
+  finalizedAt    DateTime     @default(now())
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  job            Job          @relation(fields: [jobId, organizationId], references: [id, organizationId])
+  recordedBy     User         @relation(fields: [recordedById, organizationId], references: [id, organizationId])
+  damages        InspectionDamageItem[]
+
+  @@unique([id, organizationId])
+  @@unique([jobId, organizationId])
+  @@index([organizationId, createdAt])
+}
+
+model InspectionDamageItem {
+  id             String             @id @default(cuid())
+  organizationId String
+  inspectionId   String
+  location       InspectionLocation
+  type           DamageType
+  description    String?
+  organization   Organization       @relation(fields: [organizationId], references: [id])
+  inspection     VehicleInspection  @relation(fields: [inspectionId, organizationId], references: [id, organizationId])
+  photos         Photo[]
+
+  @@unique([id, organizationId])
+  @@index([organizationId, inspectionId])
+}
+
+model Photo {
+  id             String                @id @default(cuid())
+  organizationId String
+  jobId          String
+  damageItemId   String?
+  kind           PhotoKind
+  storageKey     String                @unique
+  mimeType       String
+  byteSize       Int
+  description    String?
+  uploadedById   String
+  createdAt      DateTime              @default(now())
+  organization   Organization          @relation(fields: [organizationId], references: [id])
+  job            Job                   @relation(fields: [jobId, organizationId], references: [id, organizationId])
+  damageItem     InspectionDamageItem? @relation(fields: [damageItemId, organizationId], references: [id, organizationId])
+  uploadedBy     User                  @relation(fields: [uploadedById, organizationId], references: [id, organizationId])
+
+  @@index([organizationId, jobId, createdAt])
+}

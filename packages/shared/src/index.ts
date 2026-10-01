@@ -1,0 +1,172 @@
+import { z } from 'zod';
+
+export const roles = ['OWNER', 'EMPLOYEE'] as const;
+export type Role = (typeof roles)[number];
+
+export const stages = ['RECEIVED', 'WASHING', 'READY', 'HANDED_OVER'] as const;
+export type Stage = (typeof stages)[number];
+
+export const stageLabels: Record<Stage, string> = {
+  RECEIVED: 'Received',
+  WASHING: 'Started Washing',
+  READY: 'Ready',
+  HANDED_OVER: 'Handover',
+};
+
+export function canMoveStage(from: Stage, to: Stage): boolean {
+  const index = stages.indexOf(from);
+  return index >= 0 && index < stages.length - 1 && stages[index + 1] === to;
+}
+
+export function normalizeIndianMobile(input: string): string {
+  const digits = input.replace(/\D/g, '');
+  const local = digits.startsWith('91') && digits.length === 12 ? digits.slice(2) : digits;
+  if (!/^[6-9]\d{9}$/.test(local)) throw new Error('Enter a valid Indian mobile number');
+  return `+91${local}`;
+}
+
+export function normalizeRegistration(input: string): string {
+  const value = input.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const standard = /^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}$/;
+  const bh = /^\d{2}BH\d{4}[A-Z]{1,2}$/;
+  if (!standard.test(value) && !bh.test(value)) throw new Error('Enter a valid Indian registration number');
+  return value;
+}
+
+export const ownerLoginSchema = z.object({
+  login: z.string().trim().min(3).max(254),
+  password: z.string().min(1).max(1024),
+});
+
+export const employeeSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  mobile: z.string().transform(normalizeIndianMobile),
+  branchId: z.string().optional(),
+  active: z.boolean().default(true),
+});
+
+export const employeeUpdateSchema = employeeSchema.partial();
+export const otpRequestSchema = z.object({ mobile: z.string().transform(normalizeIndianMobile) });
+export const otpVerifySchema = otpRequestSchema.extend({ code: z.string().regex(/^\d{6}$/) });
+
+export const vehicleTypes = ['HATCHBACK', 'SEDAN', 'SUV', 'MUV', 'TWO_WHEELER', 'COMMERCIAL', 'OTHER'] as const;
+export type VehicleType = (typeof vehicleTypes)[number];
+
+const mobileSchema = z.string().transform(normalizeIndianMobile);
+export const customerSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  mobile: mobileSchema,
+  alternateMobile: mobileSchema.optional(),
+  email: z.email().max(254).optional(),
+  notes: z.string().trim().max(2000).optional(),
+  tags: z.array(z.string().trim().min(1).max(40)).max(20).default([]),
+});
+export const customerUpdateSchema = customerSchema.partial();
+
+export const vehicleSchema = z.object({
+  customerId: z.string().min(1),
+  registrationNumber: z.string().transform(normalizeRegistration),
+  make: z.string().trim().min(1).max(80),
+  model: z.string().trim().min(1).max(80),
+  variant: z.string().trim().max(80).optional(),
+  type: z.enum(vehicleTypes),
+  colour: z.string().trim().max(60).optional(),
+  year: z.number().int().min(1950).max(2100).optional(),
+  notes: z.string().trim().max(2000).optional(),
+});
+export const vehicleUpdateSchema = vehicleSchema.omit({ customerId: true, registrationNumber: true }).partial();
+
+export const serviceSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  description: z.string().trim().max(2000).optional(),
+  category: z.string().trim().min(2).max(80),
+  basePricePaise: z.number().int().min(0).max(100_000_000),
+  estimatedMinutes: z.number().int().min(1).max(10080),
+  taxRateBps: z.number().int().min(0).max(10000).default(0),
+  active: z.boolean().default(true),
+});
+export const serviceUpdateSchema = serviceSchema.partial();
+export const servicePriceSchema = z.object({
+  branchId: z.string().optional(),
+  vehicleType: z.enum(vehicleTypes),
+  pricePaise: z.number().int().min(0).max(100_000_000),
+});
+
+export const paymentMethods = ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER', 'OTHER'] as const;
+export type PaymentMethod = (typeof paymentMethods)[number];
+export const dailySummaryQuerySchema = z.object({ branchId: z.string().min(1).optional() });
+export type DailySummary = {
+  date: string;
+  timeZone: string;
+  asOf: string;
+  branchId: string | null;
+  receivedCount: number;
+  handedOverCount: number;
+  stillOnBoardCount: number;
+  collectedPaise: number;
+  collectionByMethod: { method: PaymentMethod; amountPaise: number }[];
+  unpaidPaise: number;
+  unpaidInvoiceCount: number;
+  pipelinePaise: number;
+  avgTurnaroundMinutes: number | null;
+  lateCount: number;
+  services: { name: string; count: number; valuePaise: number }[];
+  hours: { hour: number; count: number }[];
+  busiestHour: number | null;
+  staff: { id: string; name: string; cars: number; updates: number; handovers: number }[];
+  customers: { newCount: number; returningCount: number };
+  attention: { kind: 'LATE' | 'READY_WAITING' | 'UNPAID'; jobId: string; registrationNumber: string; customerName: string; detail: string; amountPaise?: number }[];
+};
+export const messageEvents = ['VEHICLE_RECEIVED', 'WASH_STARTED', 'VEHICLE_READY', 'VEHICLE_HANDED_OVER'] as const;
+export type MessageEvent = (typeof messageEvents)[number];
+
+export const checkInSchema = z.object({
+  idempotencyKey: z.uuid(),
+  mobile: mobileSchema,
+  customerName: z.string().trim().min(2).max(120),
+  registrationNumber: z.string().transform(normalizeRegistration),
+  make: z.string().trim().min(1).max(80),
+  model: z.string().trim().min(1).max(80),
+  vehicleType: z.enum(vehicleTypes),
+  serviceId: z.string().min(1),
+  branchId: z.string().min(1).optional(),
+  expectedAt: z.iso.datetime({ offset: true }),
+  notes: z.string().trim().max(2000).optional(),
+  employeeIds: z.array(z.string().min(1)).max(20).default([]),
+  notify: z.boolean().default(true),
+});
+
+export const advanceStageSchema = z.object({ to: z.enum(['WASHING', 'READY']) });
+export const stageCorrectionSchema = z.object({
+  to: z.enum(['RECEIVED', 'WASHING', 'READY']),
+  reason: z.string().trim().min(5).max(500),
+});
+export const handoverSchema = z.object({
+  paymentAmountPaise: z.number().int().min(0).max(100_000_000).default(0),
+  paymentMethod: z.enum(paymentMethods).optional(),
+  paymentReference: z.string().trim().max(120).optional(),
+  notes: z.string().trim().max(2000).optional(),
+}).refine((value) => value.paymentAmountPaise === 0 || !!value.paymentMethod, { path: ['paymentMethod'], message: 'Payment method is required for a collected amount' });
+export const paymentSchema = z.object({
+  idempotencyKey: z.uuid(),
+  amountPaise: z.number().int().positive().max(100_000_000),
+  method: z.enum(paymentMethods),
+  reference: z.string().trim().max(120).optional(),
+  notes: z.string().trim().max(2000).optional(),
+});
+export const operationSettingsSchema = z.object({
+  allowOutstanding: z.boolean().optional(),
+  employeeHandover: z.boolean().optional(),
+  sendHandoverMessage: z.boolean().optional(),
+});
+
+export const photoKinds = ['BEFORE', 'DURING', 'AFTER', 'DAMAGE'] as const;
+export const inspectionLocations = ['FRONT', 'REAR', 'LEFT', 'RIGHT', 'INTERIOR', 'WINDSHIELD', 'WHEELS', 'OTHER'] as const;
+export const damageTypes = ['SCRATCH', 'DENT', 'CRACK', 'PAINT_DAMAGE', 'BROKEN_ITEM', 'INTERIOR_DAMAGE', 'OTHER'] as const;
+export const inspectionSchema = z.object({
+  damages: z.array(z.object({
+    location: z.enum(inspectionLocations),
+    type: z.enum(damageTypes),
+    description: z.string().trim().max(1000).optional(),
+  })).max(50),
+});
