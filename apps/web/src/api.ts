@@ -25,7 +25,7 @@ export type Job = {
   photos?: { id: string; kind: 'BEFORE' | 'DURING' | 'AFTER' | 'DAMAGE'; description: string | null; damageItemId: string | null; createdAt: string; uploadedBy: { id: string; name: string } }[];
 };
 export type BoardMetrics = { inBay: number; received: number; washing: number; ready: number; late: number; collectedPaise?: number };
-export type OperationCapabilities = { allowOutstanding: boolean; canHandover: boolean };
+export type OperationCapabilities = { allowOutstanding?: boolean; canHandover: boolean };
 export type OperationSettings = { allowOutstanding: boolean; employeeHandover: boolean; sendHandoverMessage: boolean };
 export type AvailableEmployee = { id: string; name: string; branchId: string | null };
 

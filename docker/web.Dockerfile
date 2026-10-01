@@ -13,6 +13,7 @@ COPY prototype/app.css prototype/app.css
 RUN pnpm --filter @carwash/shared build && pnpm --filter @carwash/web build
 
 FROM nginx:stable-alpine3.24
+RUN apk upgrade --no-cache pcre2 expat
 COPY docker/web.nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 EXPOSE 80

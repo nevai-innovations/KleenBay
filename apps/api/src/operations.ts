@@ -42,6 +42,34 @@ async function getJob(db: Db, user: User, id: string) {
     },
   });
   if (!job) notFound();
+  if (user.role === 'EMPLOYEE') {
+    return {
+      id: job.id,
+      number: job.number,
+      status: job.status,
+      serviceName: job.serviceName,
+      checkedInAt: job.checkedInAt,
+      stageAt: job.stageAt,
+      expectedAt: job.expectedAt,
+      handedOverAt: job.handedOverAt,
+      notes: job.notes,
+      branch: job.branch,
+      customer: job.customer,
+      vehicle: job.vehicle,
+      checkedInBy: job.checkedInBy,
+      handedOverBy: job.handedOverBy,
+      stages: job.stages.map((stage) => ({ id: stage.id, fromStage: stage.fromStage, toStage: stage.toStage, note: stage.note, createdAt: stage.createdAt, actor: stage.actor })),
+      assignments: job.assignments.map((assignment) => ({ id: assignment.id, removedAt: assignment.removedAt, employee: assignment.employee })),
+      inspection: job.inspection ? {
+        id: job.inspection.id,
+        finalizedAt: job.inspection.finalizedAt,
+        recordedBy: job.inspection.recordedBy,
+        damages: job.inspection.damages.map((damage) => ({ id: damage.id, location: damage.location, type: damage.type, description: damage.description })),
+      } : null,
+      photos: job.photos,
+      messages: job.messages.map((message) => ({ id: message.id, event: message.event, status: message.status, createdAt: message.createdAt, sentAt: message.sentAt, failedAt: message.failedAt })),
+    };
+  }
   const paidPaise = job.invoice?.payments.reduce((sum, payment) => sum + payment.amountPaise, 0) ?? 0;
   return { ...job, paidPaise, outstandingPaise: Math.max(0, job.totalPaise - paidPaise), paymentStatus: paidPaise === 0 ? 'UNPAID' : paidPaise < job.totalPaise ? 'PARTIALLY_PAID' : 'PAID' };
 }
@@ -81,7 +109,8 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
   app.get('/api/operations/capabilities', async (request) => {
     const user = await currentUser(db, request);
     const org = await db.organization.findUniqueOrThrow({ where: { id: user.organizationId }, select: { allowOutstanding: true, employeeHandover: true } });
-    return { allowOutstanding: org.allowOutstanding, canHandover: user.role === 'OWNER' || org.employeeHandover };
+    if (user.role === 'EMPLOYEE') return { canHandover: org.employeeHandover && org.allowOutstanding };
+    return { allowOutstanding: org.allowOutstanding, canHandover: true };
   });
 
   app.get('/api/operations/available-employees', async (request) => {
@@ -129,7 +158,20 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
       ] } : {}),
     };
     const jobs = await db.job.findMany({ where, include: { branch: { select: { id: true, name: true } }, customer: { select: { id: true, name: true, mobile: true } }, vehicle: { select: { id: true, registrationNumber: true, make: true, model: true } } }, orderBy: { checkedInAt: 'desc' }, take: 150 });
-    return jobs.map(({ subtotalPaise, taxPaise, totalPaise, ...job }) => user.role === 'OWNER' ? { ...job, subtotalPaise, taxPaise, totalPaise } : job);
+    if (user.role === 'OWNER') return jobs;
+    return jobs.map((job) => ({
+      id: job.id,
+      number: job.number,
+      status: job.status,
+      serviceName: job.serviceName,
+      checkedInAt: job.checkedInAt,
+      stageAt: job.stageAt,
+      expectedAt: job.expectedAt,
+      handedOverAt: job.handedOverAt,
+      branch: job.branch,
+      customer: job.customer,
+      vehicle: job.vehicle,
+    }));
   });
 
   app.get('/api/board/metrics', async (request) => {
@@ -244,7 +286,10 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
     if (!job) notFound();
     if (job.status === 'HANDED_OVER') return getJob(db, user, id);
     if (job.status !== 'READY') throw new HttpError(409, 'INVALID_TRANSITION', 'Vehicle must be Ready before handover');
-    if (user.role === 'EMPLOYEE' && !job.organization.employeeHandover) forbidden();
+    if (user.role === 'EMPLOYEE') {
+      if (!job.organization.employeeHandover || !job.organization.allowOutstanding) forbidden();
+      if (input.paymentAmountPaise !== 0 || input.paymentMethod || input.paymentReference) forbidden();
+    }
     if (input.paymentAmountPaise > job.totalPaise) badRequest('Payment cannot exceed the outstanding amount');
     if (!job.organization.allowOutstanding && input.paymentAmountPaise !== job.totalPaise) badRequest('Full payment is required before handover');
     const messageId = await db.$transaction(async (tx) => {

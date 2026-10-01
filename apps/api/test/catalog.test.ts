@@ -95,6 +95,7 @@ describe('M2 catalog and tenant boundaries', () => {
     const employeeList = await request('GET', '/api/services', undefined, employeeCookie);
     expect(employeeList.json()[0].basePricePaise).toBeUndefined();
     expect(employeeList.json()[0].prices).toBeUndefined();
+    expect(employeeList.json()[0].taxRateBps).toBeUndefined();
     expect((await request('POST', '/api/services', { name: 'Secret', category: 'Wash', basePricePaise: 100, estimatedMinutes: 20 }, employeeCookie)).statusCode).toBe(403);
     expect(await db.auditLog.count({ where: { organizationId, action: 'SERVICE_PRICE_SET' } })).toBe(2);
   });

@@ -125,29 +125,29 @@ function JobCard({ job, onOpen, onAdvance, onHandover, busy, canHandover, late }
   </article>;
 }
 
-function HandoverSheet({ jobId, capabilities, onClose, onSaved }: { jobId: string; capabilities: OperationCapabilities; onClose: () => void; onSaved: () => void }) {
+function HandoverSheet({ jobId, role, capabilities, onClose, onSaved }: { jobId: string; role: Session['user']['role']; capabilities: OperationCapabilities; onClose: () => void; onSaved: () => void }) {
   const [job, setJob] = useState<Job | null>(null);
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('UPI');
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  useEffect(() => { void api<Job>(`/jobs/${jobId}`).then((item) => { setJob(item); setAmount(((item.outstandingPaise ?? item.totalPaise ?? 0) / 100).toFixed(2)); }).catch((cause) => setError(errorText(cause))); }, [jobId]);
+  useEffect(() => { void api<Job>(`/jobs/${jobId}`).then((item) => { setJob(item); if (role === 'OWNER') setAmount(((item.outstandingPaise ?? item.totalPaise ?? 0) / 100).toFixed(2)); }).catch((cause) => setError(errorText(cause))); }, [jobId, role]);
   async function submit(event: FormEvent) {
     event.preventDefault(); if (!job) return; setBusy(true); setError('');
     try {
-      await post(`/jobs/${job.id}/handover`, { paymentAmountPaise: Math.round(Number(amount) * 100), ...(Number(amount) > 0 ? { paymentMethod: method } : {}), notes });
+      await post(`/jobs/${job.id}/handover`, role === 'OWNER' ? { paymentAmountPaise: Math.round(Number(amount) * 100), ...(Number(amount) > 0 ? { paymentMethod: method } : {}), notes } : { paymentAmountPaise: 0, notes });
       onSaved();
     } catch (cause) { setError(errorText(cause)); }
     finally { setBusy(false); }
   }
   return <Sheet title="Handover" onClose={onClose}>{job && <form className="ops-form" onSubmit={(event) => void submit(event)}>
     <div className="ops-handover-summary"><strong className="plate">{job.vehicle.registrationNumber}</strong><span>{job.vehicle.make} {job.vehicle.model} · {job.customer.name}</span><span>{job.serviceName}</span></div>
-    <div className="ops-bill-row"><span>Total</span><strong>{money(job.totalPaise ?? 0)}</strong></div><div className="ops-bill-row"><span>Payment status</span><strong>{job.paymentStatus === 'PAID' ? 'Paid' : job.paymentStatus === 'PARTIALLY_PAID' ? 'Partially paid' : 'Unpaid'}</strong></div><div className="ops-bill-row"><span>Outstanding</span><strong>{money(job.outstandingPaise ?? job.totalPaise ?? 0)}</strong></div>
-    <div className="ops-form-grid"><label className="field"><span>Collect now (INR)</span><input className="input" type="number" inputMode="decimal" min={capabilities.allowOutstanding ? '0' : String((job.totalPaise ?? 0) / 100)} max={String((job.outstandingPaise ?? job.totalPaise ?? 0) / 100)} step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} required /></label><label className="field"><span>Payment method</span><select className="input" value={method} onChange={(event) => setMethod(event.target.value)} disabled={Number(amount) === 0}>{['UPI', 'CASH', 'CARD', 'BANK_TRANSFER', 'OTHER'].map((value) => <option key={value} value={value}>{value.replaceAll('_', ' ')}</option>)}</select></label></div>
+    {role === 'OWNER' && <><div className="ops-bill-row"><span>Total</span><strong>{money(job.totalPaise ?? 0)}</strong></div><div className="ops-bill-row"><span>Payment status</span><strong>{job.paymentStatus === 'PAID' ? 'Paid' : job.paymentStatus === 'PARTIALLY_PAID' ? 'Partially paid' : 'Unpaid'}</strong></div><div className="ops-bill-row"><span>Outstanding</span><strong>{money(job.outstandingPaise ?? job.totalPaise ?? 0)}</strong></div>
+      <div className="ops-form-grid"><label className="field"><span>Collect now (INR)</span><input className="input" type="number" inputMode="decimal" min={capabilities.allowOutstanding ? '0' : String((job.totalPaise ?? 0) / 100)} max={String((job.outstandingPaise ?? job.totalPaise ?? 0) / 100)} step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} required /></label><label className="field"><span>Payment method</span><select className="input" value={method} onChange={(event) => setMethod(event.target.value)} disabled={Number(amount) === 0}>{['UPI', 'CASH', 'CARD', 'BANK_TRANSFER', 'OTHER'].map((value) => <option key={value} value={value}>{value.replaceAll('_', ' ')}</option>)}</select></label></div></>}
     <label className="field"><span>Handover notes (optional)</span><textarea className="input ops-textarea" rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
     {error && <p className="portal-error" role="alert">{error}</p>}
-    <button className="btn primary block" disabled={busy || !Number.isFinite(Number(amount))}><Check size={18} />Confirm Handover</button>
+    <button className="btn primary block" disabled={busy || (role === 'OWNER' && !Number.isFinite(Number(amount)))}><Check size={18} />Confirm Handover</button>
   </form>}{!job && <p className="ops-loading">{error || 'Loading vehicle...'}</p>}</Sheet>;
 }
 
@@ -260,7 +260,7 @@ export function BoardView({ session }: { session: Session }) {
     <div className="columns ops-columns">{activeStages.map((stage) => <section key={stage} className={`col${dragOver === stage ? ' drop-ok over' : ''}${mobileStage === stage ? ' is-mobile-active' : ''}`} data-drop={stage} style={{ '--stage': stageTone[stage] } as React.CSSProperties} onDragOver={(event) => { const id = event.dataTransfer.types.includes('text/plain'); if (id && stage !== 'RECEIVED') { event.preventDefault(); setDragOver(stage); } }} onDragLeave={() => setDragOver(null)} onDrop={(event) => drop(event, stage)}><header className="col-head"><span className="dot" /><b>{stageLabels[stage as Stage]}</b><span className="n">{jobs.filter((job) => job.status === stage).length}</span></header>{jobs.filter((job) => job.status === stage).map((job) => <JobCard key={job.id} job={job} late={new Date(job.expectedAt).getTime() < now} busy={busyId === job.id} canHandover={capabilities.canHandover} onOpen={() => setDetailId(job.id)} onAdvance={() => void advance(job, stage === 'RECEIVED' ? 'WASHING' : 'READY')} onHandover={() => setHandoverId(job.id)} />)}{!jobs.some((job) => job.status === stage) && <div className="empty">No vehicles here</div>}</section>)}</div>
     {checkInOpen && <CheckInSheet session={session} branches={branches} services={services} employees={employees} onClose={() => setCheckInOpen(false)} onSaved={() => { setCheckInOpen(false); setMobileStage('RECEIVED'); void load(); }} />}
     {detailId && <JobDetail jobId={detailId} role={session.user.role} onClose={() => setDetailId(null)} onChanged={() => void load()} />}
-    {handoverId && <HandoverSheet jobId={handoverId} capabilities={capabilities} onClose={() => setHandoverId(null)} onSaved={() => { setHandoverId(null); void load(); }} />}
+    {handoverId && <HandoverSheet jobId={handoverId} role={session.user.role} capabilities={capabilities} onClose={() => setHandoverId(null)} onSaved={() => { setHandoverId(null); void load(); }} />}
   </div>;
 }
 

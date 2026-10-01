@@ -42,6 +42,28 @@ function checkIn(registrationNumber: string) {
   return { idempotencyKey: randomUUID(), mobile: '9845612399', customerName: 'Test Driver', registrationNumber, make: 'Hyundai', model: 'Creta', vehicleType: 'SUV', serviceId, branchId, expectedAt: new Date(Date.now() + 3 * 60 * 60_000).toISOString(), notify: true };
 }
 
+const privateFields = new Set([
+  'subtotalPaise', 'taxPaise', 'totalPaise', 'paidPaise', 'outstandingPaise', 'paymentStatus',
+  'invoice', 'payments', 'amountPaise', 'paymentMethod', 'paymentReference', 'collectionByMethod',
+  'basePricePaise', 'pricePaise', 'taxRateBps', 'discountPaise', 'allowOutstanding',
+  'recipient', 'renderedText', 'providerMessageId', 'failureReason',
+]);
+
+function expectOperationalOnly(value: unknown) {
+  const found: string[] = [];
+  function inspect(item: unknown) {
+    if (Array.isArray(item)) { item.forEach(inspect); return; }
+    if (item && typeof item === 'object') {
+      for (const [key, nested] of Object.entries(item)) {
+        if (privateFields.has(key)) found.push(key);
+        inspect(nested);
+      }
+    }
+  }
+  inspect(value);
+  expect(found).toEqual([]);
+}
+
 beforeAll(async () => {
   const org = await db.organization.create({ data: { slug, name: 'Operations Test' } });
   organizationId = org.id;
@@ -100,22 +122,63 @@ describe('vehicle operations', () => {
   it('lets employee check in and progress but keeps business financial controls private', async () => {
     const created = await request('POST', '/api/jobs/check-in', checkIn('KL29AB1235'), employeeCookie);
     expect(created.statusCode).toBe(201);
+    expectOperationalOnly(created.json());
     const id = created.json().id;
     expect(created.json().checkedInBy.name).toBe('Ravi');
     expect(created.json().assignments.map((assignment: { employee: { id: string } }) => assignment.employee.id)).toEqual([employeeId]);
     expect(await db.auditLog.count({ where: { organizationId, action: 'JOB_ASSIGNED', after: { path: ['jobId'], equals: id } } })).toBe(1);
     expect((await request('GET', '/api/operations/available-employees', undefined, employeeCookie)).statusCode).toBe(403);
     expect((await request('GET', '/api/jobs?view=active', undefined, otherEmployeeCookie)).json().some((job: { id: string }) => job.id === id)).toBe(true);
-    expect((await request('GET', `/api/jobs/${id}`, undefined, otherEmployeeCookie)).statusCode).toBe(200);
-    expect((await request('GET', '/api/jobs?view=active', undefined, employeeCookie)).json().find((job: { id: string }) => job.id === id).totalPaise).toBeUndefined();
-    expect((await request('GET', '/api/board/metrics', undefined, employeeCookie)).json().collectedPaise).toBeUndefined();
+    const detail = await request('GET', `/api/jobs/${id}`, undefined, otherEmployeeCookie);
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().customer.name).toBe('Test Driver');
+    expect(detail.json().stages).toHaveLength(1);
+    expectOperationalOnly(detail.json());
+    const board = await request('GET', '/api/jobs?view=active', undefined, employeeCookie);
+    expectOperationalOnly(board.json());
+    const boardJob = board.json().find((job: { id: string }) => job.id === id);
+    expect(boardJob).toBeTruthy();
+    expect(Object.keys(boardJob).sort()).toEqual(['id', 'number', 'status', 'serviceName', 'checkedInAt', 'stageAt', 'expectedAt', 'handedOverAt', 'branch', 'customer', 'vehicle'].sort());
+    expectOperationalOnly((await request('GET', '/api/board/metrics', undefined, employeeCookie)).json());
+    expectOperationalOnly((await request('GET', '/api/operations/capabilities', undefined, employeeCookie)).json());
     expect((await request('GET', '/api/operations/settings', undefined, employeeCookie)).statusCode).toBe(403);
     expect((await request('POST', `/api/jobs/${id}/payments`, { idempotencyKey: randomUUID(), amountPaise: 100, method: 'CASH' }, employeeCookie)).statusCode).toBe(403);
-    expect((await request('POST', `/api/jobs/${id}/advance`, { to: 'WASHING' }, otherEmployeeCookie)).statusCode).toBe(200);
-    expect((await request('POST', `/api/jobs/${id}/advance`, { to: 'READY' }, employeeCookie)).statusCode).toBe(200);
-    expect((await request('POST', `/api/jobs/${id}/handover`, { paymentAmountPaise: 0 }, employeeCookie)).statusCode).toBe(200);
-    expect((await request('GET', '/api/jobs?view=history&q=KL29AB1235', undefined, employeeCookie)).json()).toHaveLength(1);
+    const started = await request('POST', `/api/jobs/${id}/advance`, { to: 'WASHING' }, otherEmployeeCookie);
+    expect(started.statusCode).toBe(200);
+    expectOperationalOnly(started.json());
+    expectOperationalOnly((await request('POST', `/api/jobs/${id}/advance`, { to: 'WASHING' }, otherEmployeeCookie)).json());
+    const ready = await request('POST', `/api/jobs/${id}/advance`, { to: 'READY' }, employeeCookie);
+    expect(ready.statusCode).toBe(200);
+    expectOperationalOnly(ready.json());
+    expect((await request('POST', `/api/jobs/${id}/handover`, { paymentAmountPaise: 100, paymentMethod: 'CASH' }, employeeCookie)).statusCode).toBe(403);
+    expect(await db.invoice.count({ where: { jobId: id } })).toBe(0);
+    const handed = await request('POST', `/api/jobs/${id}/handover`, { paymentAmountPaise: 0 }, employeeCookie);
+    expect(handed.statusCode).toBe(200);
+    expectOperationalOnly(handed.json());
+    expectOperationalOnly((await request('POST', `/api/jobs/${id}/handover`, { paymentAmountPaise: 0 }, employeeCookie)).json());
+    const history = await request('GET', '/api/jobs?view=history&q=KL29AB1235', undefined, employeeCookie);
+    expect(history.json()).toHaveLength(1);
+    expectOperationalOnly(history.json());
     await vi.waitFor(async () => expect(await db.message.count({ where: { jobId: id, status: 'SENT' } })).toBe(3));
+  });
+
+  it('keeps paid invoice and payment details owner-only on job detail and history', async () => {
+    const job = await db.job.findFirstOrThrow({ where: { organizationId, vehicle: { registrationNumber: 'KL29AB1234' } } });
+    const ownerDetail = await request('GET', `/api/jobs/${job.id}`, undefined, ownerCookie);
+    expect(ownerDetail.json().totalPaise).toBe(59900);
+    expect(ownerDetail.json().outstandingPaise).toBe(0);
+    expect(ownerDetail.json().invoice.totalPaise).toBe(59900);
+    expect(ownerDetail.json().invoice.payments).toHaveLength(2);
+    const employeeDetail = await request('GET', `/api/jobs/${job.id}`, undefined, employeeCookie);
+    expect(employeeDetail.statusCode).toBe(200);
+    expect(employeeDetail.json().vehicle.registrationNumber).toBe('KL29AB1234');
+    expect(employeeDetail.json().serviceName).toBe('Premium Wash');
+    expect(employeeDetail.json().stages).toHaveLength(4);
+    expect(employeeDetail.json().messages[0]).toEqual(expect.objectContaining({ event: 'VEHICLE_RECEIVED', status: 'SENT' }));
+    expect(Object.keys(employeeDetail.json()).sort()).toEqual(['id', 'number', 'status', 'serviceName', 'checkedInAt', 'stageAt', 'expectedAt', 'handedOverAt', 'notes', 'branch', 'customer', 'vehicle', 'checkedInBy', 'handedOverBy', 'stages', 'assignments', 'inspection', 'photos', 'messages'].sort());
+    expect(Object.keys(employeeDetail.json().messages[0]).sort()).toEqual(['id', 'event', 'status', 'createdAt', 'sentAt', 'failedAt'].sort());
+    expectOperationalOnly(employeeDetail.json());
+    expectOperationalOnly((await request('GET', '/api/jobs?view=history&q=KL29AB1234', undefined, employeeCookie)).json());
   });
 
   it('keeps assignment choices owner-only, including direct API requests', async () => {
@@ -157,6 +220,10 @@ describe('vehicle operations', () => {
     expect((await request('GET', `/api/photos/${photo.json().id}`, undefined, ownerCookie)).statusCode).toBe(200);
     expect((await request('GET', `/api/photos/${photo.json().id}`, undefined, employeeCookie)).statusCode).toBe(200);
     expect((await request('GET', `/api/jobs/${job.id}`, undefined, ownerCookie)).json().photos).toHaveLength(1);
+    const employeeDetail = await request('GET', `/api/jobs/${job.id}`, undefined, employeeCookie);
+    expect(employeeDetail.json().inspection.damages).toHaveLength(1);
+    expect(employeeDetail.json().photos).toHaveLength(1);
+    expectOperationalOnly(employeeDetail.json());
     expect(await db.auditLog.count({ where: { organizationId, action: 'PHOTO_UPLOADED', entityId: photo.json().id } })).toBe(1);
   });
 
