@@ -51,11 +51,22 @@ Employee accounts are owner-created and the fixed OTP works only with the develo
 flag enabled. No SMS or WhatsApp is sent locally: message events are stored and
 marked as simulated by the local provider.
 
+The shared-RDS target architecture is documented in
+[`docs/shared-rds-database.md`](docs/shared-rds-database.md). The stage database,
+roles, secrets, and workloads were provisioned separately in AWS; the KleenBay
+production database has not been created. Production requires an explicit
+`EXPECTED_DATABASE_NAME` matching the database selected by `DATABASE_URL`.
+
+The public stage deployment manifests and runbook are under
+[`deploy/k8s-stage/`](deploy/k8s-stage/README.md). `stage.kleenbay.com` is live
+over HTTPS. Public staging disables fixed OTP and live messaging
+until a real provider is configured.
+
 The current workflow is **Received → Started Washing → Ready → Handover**. Both roles
 can check in a vehicle; Handover permissions and outstanding balances are owner
 settings. Active vehicles are on the board, and handed-over visits remain in History.
 Condition records and photos use local storage in `.local-data/uploads`.
 
 Run `pnpm verify` for lint, typecheck, tests and builds. Tests require the separate
-`carwash_test` database from `docker/postgres/init`; do not point `TEST_DATABASE_URL`
-at a real or development database because the suite clears test tables.
+`carwash_test` database from `docker/postgres/init`; the suite accepts only a
+loopback `_test` database and clears its test tables.

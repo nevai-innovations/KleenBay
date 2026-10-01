@@ -4,11 +4,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { getConfig } from '../src/config.js';
 import { createDb } from '../src/db.js';
+import { assertLocalTestDatabase } from '../src/database-target.js';
 import type { MessagingProvider } from '../src/messaging.js';
 import type { StorageProvider } from '../src/storage.js';
 
-const testUrl = process.env.TEST_DATABASE_URL;
-if (!testUrl || !new URL(testUrl).pathname.endsWith('_test')) throw new Error('TEST_DATABASE_URL must target a _test database');
+const testUrl = assertLocalTestDatabase(process.env.TEST_DATABASE_URL);
 const db = createDb(testUrl);
 const config = { ...getConfig(), NODE_ENV: 'test' as const, devOtp: true, DEV_OTP_ENABLED: 'true' as const, LOG_LEVEL: 'silent' };
 const slug = `operations-${randomUUID()}`;

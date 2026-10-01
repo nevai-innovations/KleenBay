@@ -11,6 +11,12 @@ export class LocalMessagingProvider implements MessagingProvider {
   }
 }
 
+export class DisabledMessagingProvider implements MessagingProvider {
+  async send(): Promise<{ providerMessageId: string }> {
+    throw new Error('Messaging provider is not configured');
+  }
+}
+
 export async function dispatchMessage(db: Db, provider: MessagingProvider, id: string) {
   const message = await db.message.findUnique({ where: { id } });
   if (!message || message.status !== 'PENDING') return;

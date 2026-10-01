@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+!.env.example
+.local-data
+**/node_modules
+**/dist
+**/coverage
+**/test-results
+**/*.log
+.vercel

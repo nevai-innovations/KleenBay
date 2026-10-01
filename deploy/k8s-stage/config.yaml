@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kleenbay-stage-config
+  namespace: kleenbay-stage
+data:
+  NODE_ENV: production
+  STAGING_MODE: "true"
+  DEV_OTP_ENABLED: "false"
+  APP_ORIGIN: https://stage.kleenbay.com
+  COOKIE_SECURE: "true"
+  HOST: 0.0.0.0
+  PORT: "3000"
+  TRUST_PROXY_HOPS: "1"
+  EXPECTED_DATABASE_NAME: kleenbay_stage
+  LOG_LEVEL: info

@@ -2,6 +2,7 @@ import { config as loadEnv } from 'dotenv';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { z } from 'zod';
+import { assertDatabaseTarget } from './database-target.js';
 
 loadEnv({ path: resolve(fileURLToPath(new URL('../../../.env', import.meta.url))) });
 
@@ -10,9 +11,11 @@ const schema = z.object({
   HOST: z.string().default('127.0.0.1'),
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().url(),
+  EXPECTED_DATABASE_NAME: z.string().regex(/^[a-z][a-z0-9_]*$/).optional(),
   APP_ORIGIN: z.string().url().default('http://localhost:5173'),
   COOKIE_SECURE: z.enum(['true', 'false']).optional(),
   DEV_OTP_ENABLED: z.enum(['true', 'false']).default('false'),
+  STAGING_MODE: z.enum(['true', 'false']).default('false'),
   DEV_OTP_CODE: z.string().regex(/^\d{6}$/).default('123456'),
   SESSION_HOURS: z.coerce.number().int().min(1).max(720).default(168),
   LOG_LEVEL: z.string().default('info'),
@@ -21,6 +24,10 @@ const schema = z.object({
 
 export function getConfig() {
   const env = schema.parse(process.env);
+  assertDatabaseTarget(env.DATABASE_URL, env.EXPECTED_DATABASE_NAME, env.NODE_ENV === 'production');
+  if (env.STAGING_MODE === 'true' && env.NODE_ENV !== 'production') {
+    throw new Error('Staging mode requires production runtime settings');
+  }
   if (env.NODE_ENV === 'production') {
     if (env.DEV_OTP_ENABLED === 'true') throw new Error('Development OTP cannot run in production');
     if (env.COOKIE_SECURE === 'false' || !env.APP_ORIGIN.startsWith('https://')) {
@@ -31,6 +38,7 @@ export function getConfig() {
     ...env,
     secureCookie: env.COOKIE_SECURE === 'true' || (env.COOKIE_SECURE === undefined && env.NODE_ENV === 'production'),
     devOtp: env.NODE_ENV !== 'production' && env.DEV_OTP_ENABLED === 'true',
+    stagingMode: env.STAGING_MODE === 'true',
   };
 }
 

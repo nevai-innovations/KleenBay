@@ -15,15 +15,15 @@ import { currentUser, requireOwner, revokeSession, startSession } from './auth.j
 import { HttpError, notFound } from './errors.js';
 import { createOtpProvider, type OtpProvider } from './otp.js';
 import { registerCatalogRoutes } from './catalog.js';
-import { LocalMessagingProvider, type MessagingProvider } from './messaging.js';
+import { DisabledMessagingProvider, LocalMessagingProvider, type MessagingProvider } from './messaging.js';
 import { registerOperationsRoutes } from './operations.js';
 import { registerMediaRoutes } from './media.js';
 import { registerDailySummaryRoutes } from './daily-summary.js';
 import { LocalStorageProvider, type StorageProvider } from './storage.js';
 
-export async function buildApp(config: Config, db: Db, otp: OtpProvider = createOtpProvider(config), messaging: MessagingProvider = new LocalMessagingProvider(), storage: StorageProvider = new LocalStorageProvider()) {
-  if (config.NODE_ENV === 'production' && messaging instanceof LocalMessagingProvider) throw new Error('Configure a production messaging provider before startup');
-  if (config.NODE_ENV === 'production' && storage instanceof LocalStorageProvider) throw new Error('Configure a production storage provider before startup');
+export async function buildApp(config: Config, db: Db, otp: OtpProvider = createOtpProvider(config), messaging: MessagingProvider = config.stagingMode ? new DisabledMessagingProvider() : new LocalMessagingProvider(), storage: StorageProvider = new LocalStorageProvider()) {
+  if (config.NODE_ENV === 'production' && (messaging instanceof LocalMessagingProvider || (!config.stagingMode && messaging instanceof DisabledMessagingProvider))) throw new Error('Configure a production messaging provider before startup');
+  if (config.NODE_ENV === 'production' && !config.stagingMode && storage instanceof LocalStorageProvider) throw new Error('Configure a production storage provider before startup');
   const app = Fastify({ logger: { level: config.LOG_LEVEL }, trustProxy: config.TRUST_PROXY_HOPS > 0 });
   await app.register(cookie);
   await app.register(cors, { origin: config.APP_ORIGIN, credentials: true });

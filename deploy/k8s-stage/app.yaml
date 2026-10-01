@@ -1,0 +1,182 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kleenbay-stage-uploads
+  namespace: kleenbay-stage
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kleenbay-stage-api
+  namespace: kleenbay-stage
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: kleenbay-stage-api
+  template:
+    metadata:
+      labels:
+        app: kleenbay-stage-api
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: api
+          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-api@sha256:9ccc6bdc3aa65ba0fd421e715f64058d99ceb01493e2227efd56a9e13f50c638
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: kleenbay-stage-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: kleenbay-stage-api-db
+                  key: DATABASE_URL
+          volumeMounts:
+            - name: uploads
+              mountPath: /app/.local-data/uploads
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: kleenbay-stage-uploads
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kleenbay-stage-web
+  namespace: kleenbay-stage
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kleenbay-stage-web
+  template:
+    metadata:
+      labels:
+        app: kleenbay-stage-web
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: web
+          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-web@sha256:592cd9ac3258d0e2ab1278c517e1968e40d9d3acd0694cce97b6ec297f7baa90
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kleenbay-stage-api
+  namespace: kleenbay-stage
+spec:
+  selector:
+    app: kleenbay-stage-api
+  ports:
+    - port: 3000
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kleenbay-stage-web
+  namespace: kleenbay-stage
+spec:
+  selector:
+    app: kleenbay-stage-web
+  ports:
+    - port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kleenbay-stage
+  namespace: kleenbay-stage
+  annotations:
+    alb.ingress.kubernetes.io/group.name: shared-public-v1
+    alb.ingress.kubernetes.io/group.order: "40"
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:208519604276:certificate/df0e6d9a-9b9d-4333-9e7c-874ade1484cc
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+spec:
+  ingressClassName: alb
+  rules:
+    - host: stage.kleenbay.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: kleenbay-stage-api
+                port:
+                  number: 3000
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: kleenbay-stage-api
+                port:
+                  number: 3000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kleenbay-stage-web
+                port:
+                  number: 80

@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: kleenbay-stage-bootstrap-
+  namespace: kleenbay-stage
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  template:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: bootstrap
+          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-api@sha256:9ccc6bdc3aa65ba0fd421e715f64058d99ceb01493e2227efd56a9e13f50c638
+          command: [node, apps/api/dist/scripts/bootstrap-stage.js]
+          envFrom:
+            - configMapRef:
+                name: kleenbay-stage-config
+            - secretRef:
+                name: kleenbay-stage-bootstrap
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: kleenbay-stage-api-db
+                  key: DATABASE_URL

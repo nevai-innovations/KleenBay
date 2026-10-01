@@ -1,4 +1,5 @@
 import type { Config } from './config.js';
+import { HttpError } from './errors.js';
 
 export interface OtpProvider {
   send(mobile: string, code: string): Promise<void>;
@@ -9,7 +10,7 @@ class DevelopmentOtpProvider implements OtpProvider {
 }
 
 class UnconfiguredOtpProvider implements OtpProvider {
-  async send() { throw new Error('OTP provider is not configured'); }
+  async send() { throw new HttpError(503, 'OTP_UNAVAILABLE', 'Employee OTP is not configured'); }
 }
 
 export function createOtpProvider(config: Config): OtpProvider {
