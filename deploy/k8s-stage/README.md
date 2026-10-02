@@ -28,8 +28,8 @@ commands. Do not use the current default context or namespace implicitly.
   `STAGE_OWNER_NAME`, `STAGE_OWNER_USERNAME`, `STAGE_OWNER_EMAIL`, and a random
   `STAGE_OWNER_PASSWORD` of at least 16 characters. This job refuses to
   overwrite an existing organization.
-- Build and test both images. The job/app manifests pin tested ECR images by
-  digest. Update all three manifests together for a later release.
+- Build and test both images. The app, migration, and smoke-job manifests pin
+  tested ECR images by digest; keep those used in a release aligned.
 
 ## Release order
 
