@@ -1,9 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { ArrowLeft, ChartNoAxesColumn, Columns3, ContactRound, History, Pencil, Settings2, Sparkles, Users } from 'lucide-react';
+
+import { ArrowLeft, ChartNoAxesColumn, Columns3, ContactRound, CreditCard, History, Pencil, Settings2, Sparkles, Users } from 'lucide-react';
 import { api, patch, post, type Branch, type Employee, type Session } from './api';
 import { CustomersView, ServicesView } from './CatalogViews';
 import { BoardView, HistoryView, OperationsSettingsView } from './OperationsViews';
 import { DailySummaryView } from './DailySummaryView';
+import BillingView from './BillingView';
 
 function Field({ label, ...props }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return <label className="field"><span>{label}</span><input className="input" {...props} /></label>;
@@ -75,7 +77,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
 
   return <div className={`login-page${otpSent && mode === 'employee' ? ' is-verifying' : ''}`}>
     <div className="login-wrap">
-      <Brand subtitle="Car wash operations" />
+      <Brand  />
       <div className={`login-box${otpSent && mode === 'employee' ? ' is-verifying' : ''}`}>
         {otpSent && mode === 'employee' ? <div className="otp-view">
           <button type="button" className="otp-back" onClick={editMobile} aria-label="Back to mobile number" title="Back to mobile number"><ArrowLeft size={20} /></button>
@@ -106,8 +108,15 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   </div>;
 }
 
+
+
 function OwnerPortal({ session, onLogout }: { session: Session; onLogout: () => void }) {
-  const [section, setSection] = useState<'board' | 'summary' | 'history' | 'employees' | 'customers' | 'services' | 'settings'>('board');
+
+const [section, setSection] = useState<
+  'board' | 'summary' | 'history' | 'employees' |
+  'customers' | 'services' | 'billing' | 'settings'
+>('board');
+
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [name, setName] = useState('');
@@ -141,15 +150,17 @@ function OwnerPortal({ session, onLogout }: { session: Session; onLogout: () => 
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not update employee'); }
   }
 
-  const navigation = [
-    { id: 'board' as const, label: 'Board', icon: Columns3 },
-    { id: 'summary' as const, label: 'Daily Summary', icon: ChartNoAxesColumn },
-    { id: 'history' as const, label: 'History', icon: History },
-    { id: 'employees' as const, label: 'Employees', icon: Users },
-    { id: 'customers' as const, label: 'Customers', icon: ContactRound },
-    { id: 'services' as const, label: 'Services', icon: Sparkles },
-    { id: 'settings' as const, label: 'Settings', icon: Settings2 },
-  ];
+const navigation = [
+  { id: 'board' as const, label: 'Board', icon: Columns3 },
+  { id: 'summary' as const, label: 'Daily Summary', icon: ChartNoAxesColumn },
+  { id: 'history' as const, label: 'History', icon: History },
+  { id: 'employees' as const, label: 'Employees', icon: Users },
+  { id: 'customers' as const, label: 'Customers', icon: ContactRound },
+  { id: 'services' as const, label: 'Services', icon: Sparkles },
+  { id: 'billing' as const, label: 'Billing', icon: CreditCard },
+  { id: 'settings' as const, label: 'Settings', icon: Settings2 },
+];
+
   const sectionTitle = navigation.find((item) => item.id === section)!.label;
 
   return <div className="shell">
@@ -165,7 +176,9 @@ function OwnerPortal({ session, onLogout }: { session: Session; onLogout: () => 
           <form className="panel add-form" onSubmit={addEmployee}><h3>Add Employee</h3><Field label="Employee name" value={name} onChange={(event) => setName(event.target.value)} required /><Field label="Mobile number" type="tel" inputMode="tel" value={mobile} onChange={(event) => setMobile(event.target.value)} required />
             {branches.length > 1 && <label className="field"><span>Branch</span><select className="input" value={branchId} onChange={(event) => setBranchId(event.target.value)}><option value="">All branches</option>{branches.map((branch) => <option value={branch.id} key={branch.id}>{branch.name}</option>)}</select></label>}
             <button className="btn primary block" disabled={busy}>Add employee</button></form></div>
-        {error && <div className="portal-error" role="alert">{error}</div>}</> : section === 'customers' ? <CustomersView /> : section === 'services' ? <ServicesView /> : <OperationsSettingsView />}
+
+{error && <div className="portal-error" role="alert">{error}</div>}</> : section === 'customers' ? <CustomersView /> : section === 'services' ? <ServicesView /> : section === 'billing' ? <BillingView /> : <OperationsSettingsView />}
+
       </main></div>
   </div>;
 }
