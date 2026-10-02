@@ -101,12 +101,12 @@ spec:
       labels:
         app: kleenbay-stage-web
       annotations:
-        kleenbay.com/source-revision: 6f2197083e3941dc0c92a236e5b62feb92b25c13
+        kleenbay.com/source-revision: fb142e3b27d38bc67bc2e077cda3b56f54d8e626
     spec:
       automountServiceAccountToken: false
       containers:
         - name: web
-          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-web@sha256:810ff4a1f3035dc294c0ff3269d6df753f10978f4c751c35b48bb4e83650bd0a
+          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-web@sha256:ed03744931705a59f8e7cb4326b53e03b21212cbfec14a2ef04da8d62eedd7fe
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
