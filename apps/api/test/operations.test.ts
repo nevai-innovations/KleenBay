@@ -7,6 +7,7 @@ import { createDb } from '../src/db.js';
 import { assertLocalTestDatabase } from '../src/database-target.js';
 import type { MessagingProvider } from '../src/messaging.js';
 import type { StorageProvider } from '../src/storage.js';
+import { createTrackingToken, readTrackingToken } from '../src/tracking.js';
 
 const testUrl = assertLocalTestDatabase(process.env.TEST_DATABASE_URL);
 const db = createDb(testUrl);
@@ -354,5 +355,121 @@ describe('vehicle operations', () => {
     } finally {
       await db.organizationWhatsAppConfig.update({ where: { organizationId }, data: { provider: 'MOCK', status: 'MOCK_ACTIVE' } });
     }
+  });
+
+  it('creates one private link at check-in even without messages and exposes only customer-safe status across every stage', async () => {
+    await request('PATCH', '/api/operations/settings', { allowOutstanding: true, showCustomerTrackingLink: true }, ownerCookie);
+    const created = await request('POST', '/api/jobs/check-in', { ...checkIn('KL29AB1270'), notify: false }, ownerCookie);
+    expect(created.statusCode).toBe(201);
+    const id = created.json().id as string;
+    const stored = await db.job.findUniqueOrThrow({ where: { id } });
+    expect(stored.trackingTokenHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(stored.trackingTokenCiphertext).toBeTruthy();
+    expect(created.body).not.toContain(stored.trackingTokenHash!);
+    expect(created.body).not.toContain(stored.trackingTokenCiphertext!);
+    const link = await request('POST', `/api/jobs/${id}/tracking-link`, {}, employeeCookie);
+    expect(link.statusCode).toBe(200);
+    const token = /\/track\/([A-Za-z0-9_-]{43})/.exec(link.json().url)?.[1];
+    expect(token).toBeTruthy();
+    expect(token).not.toBe(id);
+    expect((await request('POST', `/api/jobs/${id}/tracking-link`, {}, ownerCookie)).json().url).toBe(link.json().url);
+    const other = await request('POST', '/api/jobs/check-in', { ...checkIn('KL29AB1271'), notify: false }, ownerCookie);
+    const otherLink = await request('POST', `/api/jobs/${other.json().id}/tracking-link`, {}, ownerCookie);
+    expect(otherLink.json().url).not.toBe(link.json().url);
+    expect((await request('GET', `/api/public/tracking/${token}`)).statusCode).toBe(200);
+    const received = (await request('GET', `/api/public/tracking/${token}`)).json();
+    expect(received).toMatchObject({ businessName: 'Operations Test', vehicleRegistration: 'KL29AB1270', vehicleMake: 'Hyundai', vehicleModel: 'Creta', serviceName: 'Premium Wash', status: 'RECEIVED', photos: [], washingStartedAt: null, readyAt: null, handedOverAt: null });
+    expect(Object.keys(received).sort()).toEqual(['businessName', 'businessLogoUrl', 'vehicleRegistration', 'vehicleMake', 'vehicleModel', 'serviceName', 'status', 'expectedCompletionAt', 'receivedAt', 'washingStartedAt', 'readyAt', 'handedOverAt', 'photos'].sort());
+    expect(JSON.stringify(received)).not.toMatch(/(?:customerId|organizationId|jobId|invoice|payment|totalPaise|notes|employee|mobile|audit|trackingTokenHash)/i);
+    expect((await request('GET', `/api/public/tracking/${'A'.repeat(43)}`)).statusCode).toBe(404);
+    expect((await request('GET', '/api/public/tracking/bad')).statusCode).toBe(404);
+    expect((await request('POST', `/api/jobs/${id}/advance`, { to: 'WASHING' }, ownerCookie)).statusCode).toBe(200);
+    expect((await request('GET', `/api/public/tracking/${token}`)).json()).toMatchObject({ status: 'WASHING', washingStartedAt: expect.any(String) });
+    expect((await request('POST', `/api/jobs/${id}/advance`, { to: 'READY' }, ownerCookie)).statusCode).toBe(200);
+    expect((await request('GET', `/api/public/tracking/${token}`)).json()).toMatchObject({ status: 'READY', readyAt: expect.any(String) });
+    expect((await request('POST', `/api/jobs/${id}/handover`, { paymentAmountPaise: 0 }, ownerCookie)).statusCode).toBe(200);
+    expect((await request('GET', `/api/public/tracking/${token}`)).json()).toMatchObject({ status: 'HANDED_OVER', handedOverAt: expect.any(String) });
+    await db.job.update({ where: { id }, data: { handedOverAt: new Date(Date.now() - 31 * 86_400_000) } });
+    const expired = await request('GET', `/api/public/tracking/${token}`);
+    expect(expired.statusCode).toBe(410);
+    expect(expired.json().error.message).toBe('This tracking link has expired.');
+    expect((await request('GET', `/api/public/tracking/${token}/photos/1`)).statusCode).toBe(410);
+  });
+
+  it('requires both owner approval and organization opt-in to share an AFTER photo', async () => {
+    await request('PATCH', '/api/operations/settings', { showCustomerTrackingLink: true, showCompletedVehiclePhotos: false }, ownerCookie);
+    const created = await request('POST', '/api/jobs/check-in', { ...checkIn('KL29AB1272'), notify: false }, ownerCookie);
+    const id = created.json().id as string;
+    const link = await request('POST', `/api/jobs/${id}/tracking-link`, {}, ownerCookie);
+    const token = /\/track\/([A-Za-z0-9_-]{43})/.exec(link.json().url)?.[1];
+    expect(token).toBeTruthy();
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/aakAAAAASUVORK5CYII=', 'base64');
+    async function upload(kind: 'BEFORE' | 'AFTER') {
+      const boundary = `test-${randomUUID()}`;
+      return app.inject({ method: 'POST', url: `/api/jobs/${id}/photos?kind=${kind}`, headers: { origin: config.APP_ORIGIN, 'content-type': `multipart/form-data; boundary=${boundary}`, cookie: ownerCookie }, payload: Buffer.concat([Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="wash.png"\r\nContent-Type: image/png\r\n\r\n`), png, Buffer.from(`\r\n--${boundary}--\r\n`)]) });
+    }
+    const before = await upload('BEFORE');
+    const after = await upload('AFTER');
+    expect(before.statusCode).toBe(201);
+    expect(after.statusCode).toBe(201);
+    const visibilityPath = `/api/jobs/${id}/photos/${after.json().id}/customer-visibility`;
+    expect((await request('PATCH', visibilityPath, { customerVisible: true }, employeeCookie)).statusCode).toBe(403);
+    expect((await request('PATCH', `/api/jobs/${id}/photos/${before.json().id}/customer-visibility`, { customerVisible: true }, ownerCookie)).statusCode).toBe(409);
+    expect((await request('PATCH', visibilityPath, { customerVisible: true }, ownerCookie)).statusCode).toBe(200);
+    expect((await request('GET', `/api/public/tracking/${token}`)).json().photos).toEqual([]);
+    expect((await request('GET', `/api/public/tracking/${token}/photos/1`)).statusCode).toBe(404);
+    expect((await request('PATCH', '/api/operations/settings', { showCompletedVehiclePhotos: true }, ownerCookie)).statusCode).toBe(200);
+    const publicPhoto = (await request('GET', `/api/public/tracking/${token}`)).json().photos;
+    expect(publicPhoto).toEqual([{ url: `/api/public/tracking/${token}/photos/1` }]);
+    const photoResponse = await request('GET', publicPhoto[0].url);
+    expect(photoResponse.statusCode).toBe(200);
+    expect(photoResponse.headers['content-type']).toContain('image/png');
+    expect((await request('GET', `/api/public/tracking/${token}/photos/2`)).statusCode).toBe(404);
+    expect(await db.auditLog.count({ where: { organizationId, action: 'PHOTO_CUSTOMER_VISIBILITY_CHANGED', entityId: after.json().id } })).toBe(1);
+    expect((await request('PATCH', visibilityPath, { customerVisible: false }, ownerCookie)).statusCode).toBe(200);
+    expect((await request('GET', `/api/public/tracking/${token}`)).json().photos).toEqual([]);
+    await request('PATCH', '/api/operations/settings', { showCompletedVehiclePhotos: false }, ownerCookie);
+  });
+
+  it('blocks tracking when disabled and isolates link controls by tenant', async () => {
+    const created = await request('POST', '/api/jobs/check-in', checkIn('KL29AB1273'), ownerCookie);
+    const id = created.json().id as string;
+    const link = await request('POST', `/api/jobs/${id}/tracking-link`, {}, ownerCookie);
+    const token = /\/track\/([A-Za-z0-9_-]{43})/.exec(link.json().url)?.[1];
+    expect(token).toBeTruthy();
+    await vi.waitFor(async () => expect(await db.message.count({ where: { jobId: id, status: 'SENT' } })).toBe(1));
+    const received = await db.message.findFirstOrThrow({ where: { jobId: id } });
+    expect(received.renderedText).toContain(`/track/${token}`);
+    await request('POST', `/api/jobs/${id}/advance`, { to: 'WASHING' }, ownerCookie);
+    await request('POST', `/api/jobs/${id}/advance`, { to: 'READY' }, ownerCookie);
+    const messages = await db.message.findMany({ where: { jobId: id } });
+    expect(messages).toHaveLength(3);
+    expect(messages.every((message) => message.renderedText.includes(`/track/${token}`))).toBe(true);
+    expect((await request('PATCH', '/api/operations/settings', { showCustomerTrackingLink: false }, employeeCookie)).statusCode).toBe(403);
+    await request('PATCH', '/api/operations/settings', { showCustomerTrackingLink: false }, ownerCookie);
+    expect((await request('GET', `/api/public/tracking/${token}`)).statusCode).toBe(404);
+    expect((await request('POST', `/api/jobs/${id}/tracking-link`, {}, ownerCookie)).json()).toEqual({ enabled: false, url: null });
+    const hiddenJob = await request('POST', '/api/jobs/check-in', checkIn('KL29AB1274'), ownerCookie);
+    await vi.waitFor(async () => expect(await db.message.count({ where: { jobId: hiddenJob.json().id, status: 'SENT' } })).toBe(1));
+    expect((await db.message.findFirstOrThrow({ where: { jobId: hiddenJob.json().id } })).renderedText).not.toContain('/track/');
+    expect((await db.job.findUniqueOrThrow({ where: { id: hiddenJob.json().id } })).trackingTokenHash).toBeTruthy();
+    await request('PATCH', '/api/operations/settings', { showCustomerTrackingLink: true }, ownerCookie);
+    expect((await request('GET', `/api/public/tracking/${token}`)).statusCode).toBe(200);
+
+    const otherOrg = await db.organization.create({ data: { slug: `tracking-${randomUUID()}`, name: 'Other Wash' } });
+    const otherOwner = await db.user.create({ data: { organizationId: otherOrg.id, role: 'OWNER', name: 'Other', username: 'tracking-owner', passwordHash: await hash('other-password') } });
+    const otherLogin = await app.inject({ method: 'POST', url: '/api/auth/owner/login', headers: { 'x-organization-slug': otherOrg.slug }, payload: { login: 'tracking-owner', password: 'other-password' } });
+    const otherCookie = `${otherLogin.cookies[0]!.name}=${otherLogin.cookies[0]!.value}`;
+    expect((await request('POST', `/api/jobs/${id}/tracking-link`, {}, otherCookie)).statusCode).toBe(404);
+    expect((await request('PATCH', `/api/jobs/${id}/photos/no-photo/customer-visibility`, { customerVisible: true }, otherCookie)).statusCode).toBe(404);
+    const otherBranch = await db.branch.create({ data: { organizationId: otherOrg.id, name: 'Other Bay' } });
+    const otherCustomer = await db.customer.create({ data: { organizationId: otherOrg.id, name: 'Other Driver', mobile: '+919999888877' } });
+    const otherVehicle = await db.vehicle.create({ data: { organizationId: otherOrg.id, customerId: otherCustomer.id, registrationNumber: 'KA01AB1234', make: 'Maruti', model: 'Swift', type: 'HATCHBACK' } });
+    const otherService = await db.service.create({ data: { organizationId: otherOrg.id, name: 'Other Wash', category: 'Wash', basePricePaise: 10000, estimatedMinutes: 30 } });
+    const otherTracking = createTrackingToken(config.trackingSecret);
+    await db.job.create({ data: { organizationId: otherOrg.id, branchId: otherBranch.id, customerId: otherCustomer.id, vehicleId: otherVehicle.id, serviceId: otherService.id, checkedInById: otherOwner.id, number: 1, idempotencyKey: randomUUID(), serviceName: 'Other Wash', subtotalPaise: 10000, taxPaise: 0, totalPaise: 10000, expectedAt: new Date(Date.now() + 3_600_000), trackingTokenHash: otherTracking.hash, trackingTokenCiphertext: otherTracking.ciphertext } });
+    const otherToken = readTrackingToken(config.trackingSecret, otherTracking.ciphertext);
+    expect((await request('GET', `/api/public/tracking/${otherToken}`)).json()).toMatchObject({ businessName: 'Other Wash', vehicleRegistration: 'KA01AB1234' });
+    expect((await request('GET', `/api/public/tracking/${token}`)).json()).toMatchObject({ businessName: 'Operations Test', vehicleRegistration: 'KL29AB1273' });
   });
 });

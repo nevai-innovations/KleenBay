@@ -125,6 +125,8 @@ model Organization {
   allowOutstanding Boolean @default(true)
   employeeHandover Boolean @default(true)
   sendHandoverMessage Boolean @default(false)
+  showCustomerTrackingLink Boolean @default(true)
+  showCompletedVehiclePhotos Boolean @default(false)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   branches      Branch[]
@@ -670,6 +672,7 @@ model Photo {
   mimeType       String
   byteSize       Int
   description    String?
+  customerVisible Boolean @default(false)
   uploadedById   String
   createdAt      DateTime              @default(now())
   organization   Organization          @relation(fields: [organizationId], references: [id])

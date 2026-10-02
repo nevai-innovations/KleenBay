@@ -31,11 +31,12 @@ export function createMessagingProvider(config: Config): MessagingProvider {
   throw new Error('MSG91 WhatsApp messaging is not enabled');
 }
 
-export function renderCustomerMessage(event: MessageEvent, customerName: string, vehicleNumber: string, businessName: string, trackingUrl: string) {
+export function renderCustomerMessage(event: MessageEvent, customerName: string, vehicleNumber: string, businessName: string, trackingUrl?: string) {
+  const link = trackingUrl ? ` Track your vehicle: ${trackingUrl}` : '';
   switch (event) {
-    case 'VEHICLE_RECEIVED': return `Hi ${customerName}, your vehicle ${vehicleNumber} has been received at ${businessName}. We will keep you updated on the wash progress. Track your vehicle: ${trackingUrl}`;
-    case 'WASH_STARTED': return `Hi ${customerName}, washing has started for your vehicle ${vehicleNumber} at ${businessName}. Track progress: ${trackingUrl}`;
-    case 'VEHICLE_READY': return `Hi ${customerName}, your vehicle ${vehicleNumber} is ready for pickup at ${businessName}. Thank you. Track status: ${trackingUrl}`;
+    case 'VEHICLE_RECEIVED': return `Hi ${customerName}, your vehicle ${vehicleNumber} has been received at ${businessName}. We will keep you updated on the wash progress.${link}`;
+    case 'WASH_STARTED': return `Hi ${customerName}, washing has started for your vehicle ${vehicleNumber} at ${businessName}.${link}`;
+    case 'VEHICLE_READY': return `Hi ${customerName}, your vehicle ${vehicleNumber} is ready for pickup at ${businessName}. Thank you.${link}`;
     case 'VEHICLE_HANDED_OVER': return `Thank you for visiting ${businessName}. Your vehicle ${vehicleNumber} has been handed over successfully.`;
   }
 }

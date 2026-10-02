@@ -26,6 +26,7 @@ const schema = z.object({
   DUMMY_OTP: z.string().regex(/^\d{6}$/).optional(),
   OTP_HASH_SECRET: z.string().min(32).optional(),
   TRACKING_TOKEN_SECRET: z.string().min(32).optional(),
+  TRACKING_EXPIRY_DAYS: z.coerce.number().int().min(1).max(365).default(30),
   MSG91_AUTH_KEY: z.string().min(1).optional(),
   MSG91_WIDGET_ID: z.string().min(1).optional(),
   MSG91_WIDGET_TOKEN: z.string().min(1).optional(),

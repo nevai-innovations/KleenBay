@@ -8,7 +8,7 @@ import { currentUser, requireOwner } from './auth.js';
 import { resolveServicePrice } from './catalog.js';
 import { badRequest, forbidden, HttpError, notFound } from './errors.js';
 import { dispatchMessage, messageRecipient, renderCustomerMessage, type MessagingProvider } from './messaging.js';
-import { createTrackingToken, readTrackingToken, trackingHash, trackingUrl } from './tracking.js';
+import { createTrackingToken, readTrackingToken, trackingUrl } from './tracking.js';
 import type { Config } from './config.js';
 
 const idParams = z.object({ id: z.string().min(1) });
@@ -40,7 +40,7 @@ async function getJob(db: Db, user: User, id: string) {
       messages: { include: { deliveryAttempts: { orderBy: { number: 'asc' } } }, orderBy: { createdAt: 'asc' } },
       invoice: { include: { payments: { include: { collectedBy: { select: { id: true, name: true } } }, orderBy: { createdAt: 'asc' } } } },
       inspection: { include: { recordedBy: { select: { id: true, name: true } }, damages: true } },
-      photos: { select: { id: true, kind: true, description: true, damageItemId: true, createdAt: true, uploadedBy: { select: { id: true, name: true } } }, orderBy: { createdAt: 'asc' } },
+      photos: { select: { id: true, kind: true, description: true, customerVisible: true, damageItemId: true, createdAt: true, uploadedBy: { select: { id: true, name: true } } }, orderBy: { createdAt: 'asc' } },
     },
   });
   if (!job) notFound();
@@ -82,6 +82,7 @@ async function queueMessage(tx: Prisma.TransactionClient, job: { id: string; org
   if (settings?.enabled === false) return null;
   const templateKey = { VEHICLE_RECEIVED: settings?.templateReceived ?? 'VEHICLE_RECEIVED', WASH_STARTED: settings?.templateWashing ?? 'WASH_STARTED', VEHICLE_READY: settings?.templateReady ?? 'VEHICLE_READY', VEHICLE_HANDED_OVER: settings ? settings.templateHandedOver : 'VEHICLE_HANDED_OVER' }[event];
   if (!templateKey) return null;
+  const organization = await tx.organization.findUniqueOrThrow({ where: { id: job.organizationId }, select: { showCustomerTrackingLink: true } });
   let tokenHash = job.trackingTokenHash;
   let ciphertext = job.trackingTokenCiphertext;
   if (!tokenHash || !ciphertext) {
@@ -90,7 +91,7 @@ async function queueMessage(tx: Prisma.TransactionClient, job: { id: string; org
     ciphertext = generated.ciphertext;
     await tx.job.update({ where: { id: job.id }, data: { trackingTokenHash: tokenHash, trackingTokenCiphertext: ciphertext } });
   }
-  const url = trackingUrl(config.APP_ORIGIN, readTrackingToken(config.trackingSecret, ciphertext));
+  const url = organization.showCustomerTrackingLink ? trackingUrl(config.APP_ORIGIN, readTrackingToken(config.trackingSecret, ciphertext)) : undefined;
   const message = await tx.message.upsert({
     where: { jobId_event: { jobId: job.id, event } },
     update: {},
@@ -100,13 +101,6 @@ async function queueMessage(tx: Prisma.TransactionClient, job: { id: string; org
 }
 
 export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging: MessagingProvider, config: Config) {
-  app.get('/api/public/track/:token', async (request) => {
-    const { token } = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }).parse(request.params);
-    const job = await db.job.findUnique({ where: { trackingTokenHash: trackingHash(token) }, select: { status: true, serviceName: true, expectedAt: true, handedOverAt: true, organization: { select: { name: true } }, vehicle: { select: { registrationNumber: true } } } });
-    if (!job) notFound();
-    return { businessName: job.organization.name, vehicleNumber: job.vehicle.registrationNumber, serviceName: job.serviceName, status: job.status, expectedAt: job.expectedAt, handedOverAt: job.handedOverAt };
-  });
-
   const dispatch = (id: string | null) => {
     if (id) setImmediate(() => { void dispatchMessage(db, messaging, id).catch((error: unknown) => app.log.error({ err: error, messageId: id }, 'Message dispatch failed')); });
   };
@@ -135,15 +129,15 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
 
   app.get('/api/operations/settings', async (request) => {
     const owner = await requireOwner(db, request);
-    return db.organization.findUniqueOrThrow({ where: { id: owner.organizationId }, select: { allowOutstanding: true, employeeHandover: true, sendHandoverMessage: true } });
+    return db.organization.findUniqueOrThrow({ where: { id: owner.organizationId }, select: { allowOutstanding: true, employeeHandover: true, sendHandoverMessage: true, showCustomerTrackingLink: true, showCompletedVehiclePhotos: true } });
   });
 
   app.patch('/api/operations/settings', async (request) => {
     const owner = await requireOwner(db, request);
     const input = operationSettingsSchema.parse(request.body);
-    const before = await db.organization.findUniqueOrThrow({ where: { id: owner.organizationId }, select: { allowOutstanding: true, employeeHandover: true, sendHandoverMessage: true } });
+    const before = await db.organization.findUniqueOrThrow({ where: { id: owner.organizationId }, select: { allowOutstanding: true, employeeHandover: true, sendHandoverMessage: true, showCustomerTrackingLink: true, showCompletedVehiclePhotos: true } });
     return db.$transaction(async (tx) => {
-      const updated = await tx.organization.update({ where: { id: owner.organizationId }, data: input, select: { allowOutstanding: true, employeeHandover: true, sendHandoverMessage: true } });
+      const updated = await tx.organization.update({ where: { id: owner.organizationId }, data: input, select: { allowOutstanding: true, employeeHandover: true, sendHandoverMessage: true, showCustomerTrackingLink: true, showCompletedVehiclePhotos: true } });
       await audit(tx, { organizationId: owner.organizationId, actorUserId: owner.id, action: 'OPERATIONS_SETTINGS_UPDATED', entityType: 'Organization', entityId: owner.organizationId, before, after: updated, ipAddress: request.ip });
       return updated;
     });
@@ -236,7 +230,8 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
       }
       const org = await tx.organization.update({ where: { id: user.organizationId }, data: { nextJobNumber: { increment: 1 } }, select: { nextJobNumber: true, name: true } });
       const taxPaise = Math.round(priced.pricePaise * priced.service.taxRateBps / 10_000);
-      const job = await tx.job.create({ data: { organizationId: user.organizationId, branchId, customerId: customer.id, vehicleId: vehicle.id, serviceId: priced.service.id, number: org.nextJobNumber - 1, idempotencyKey: input.idempotencyKey, serviceName: priced.service.name, subtotalPaise: priced.pricePaise, taxPaise, totalPaise: priced.pricePaise + taxPaise, checkedInById: user.id, expectedAt, notes: input.notes, notify: input.notify } });
+      const tracking = createTrackingToken(config.trackingSecret);
+      const job = await tx.job.create({ data: { organizationId: user.organizationId, branchId, customerId: customer.id, vehicleId: vehicle.id, serviceId: priced.service.id, number: org.nextJobNumber - 1, idempotencyKey: input.idempotencyKey, serviceName: priced.service.name, subtotalPaise: priced.pricePaise, taxPaise, totalPaise: priced.pricePaise + taxPaise, checkedInById: user.id, expectedAt, notes: input.notes, notify: input.notify, trackingTokenHash: tracking.hash, trackingTokenCiphertext: tracking.ciphertext } });
       await tx.jobStageHistory.create({ data: { organizationId: user.organizationId, jobId: job.id, toStage: 'RECEIVED', actorUserId: user.id, note: 'Vehicle checked in' } });
       for (const employeeId of employeeIds) {
         const assignment = await tx.jobAssignment.create({ data: { organizationId: user.organizationId, jobId: job.id, employeeId, assignedById: user.id } });
@@ -254,6 +249,26 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
     const user = await currentUser(db, request);
     const { id } = idParams.parse(request.params);
     return getJob(db, user, id);
+  });
+
+  app.post('/api/jobs/:id/tracking-link', async (request) => {
+    const user = await currentUser(db, request);
+    const { id } = idParams.parse(request.params);
+    const job = await db.job.findFirst({ where: { id, ...jobScope(user) }, select: { id: true, trackingTokenCiphertext: true, organization: { select: { showCustomerTrackingLink: true } } } });
+    if (!job) notFound();
+    if (!job.organization.showCustomerTrackingLink) return { enabled: false, url: null };
+    let ciphertext = job.trackingTokenCiphertext;
+    if (!ciphertext) {
+      const tracking = createTrackingToken(config.trackingSecret);
+      const updated = await db.$transaction(async (tx) => {
+        const result = await tx.job.updateMany({ where: { id, organizationId: user.organizationId, trackingTokenHash: null }, data: { trackingTokenHash: tracking.hash, trackingTokenCiphertext: tracking.ciphertext } });
+        if (result.count) await audit(tx, { organizationId: user.organizationId, actorUserId: user.id, action: 'JOB_TRACKING_TOKEN_CREATED', entityType: 'Job', entityId: id, ipAddress: request.ip });
+        return result.count;
+      });
+      ciphertext = updated ? tracking.ciphertext : (await db.job.findUniqueOrThrow({ where: { id }, select: { trackingTokenCiphertext: true } })).trackingTokenCiphertext;
+    }
+    if (!ciphertext) throw new HttpError(409, 'TRACKING_UNAVAILABLE', 'Tracking link is unavailable');
+    return { enabled: true, url: trackingUrl(config.APP_ORIGIN, readTrackingToken(config.trackingSecret, ciphertext)) };
   });
 
   app.post('/api/jobs/:id/advance', async (request) => {

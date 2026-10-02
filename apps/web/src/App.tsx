@@ -253,7 +253,7 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [logoutError, setLogoutError] = useState('');
-  useEffect(() => { void api<Session>('/auth/me').then(setSession).catch(() => {}).finally(() => setLoading(false)); }, []);
+  useEffect(() => { if (trackToken || isLegalPath(window.location.pathname)) return; void api<Session>('/auth/me').then(setSession).catch(() => {}).finally(() => setLoading(false)); }, [trackToken]);
   useEffect(() => { document.body.classList.toggle('authed', !!session); }, [session]);
   async function logout() {
     setLogoutError('');

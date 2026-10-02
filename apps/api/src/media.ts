@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { inspectionSchema, photoKinds } from '@carwash/shared';
 import type { Db } from './db.js';
 import { audit } from './audit.js';
-import { currentUser } from './auth.js';
+import { currentUser, requireOwner } from './auth.js';
 import { HttpError, notFound } from './errors.js';
 import { imageType, type StorageProvider } from './storage.js';
 
@@ -66,5 +66,21 @@ export function registerMediaRoutes(app: FastifyInstance, db: Db, storage: Stora
     const photo = await db.photo.findFirst({ where: { id, organizationId: user.organizationId, ...(user.role === 'EMPLOYEE' && user.branchId ? { job: { branchId: user.branchId } } : {}) } });
     if (!photo) notFound();
     return reply.header('Cache-Control', 'private, max-age=300').header('X-Content-Type-Options', 'nosniff').type(photo.mimeType).send(await storage.get(photo.storageKey));
+  });
+
+  app.patch('/api/jobs/:id/photos/:photoId/customer-visibility', async (request) => {
+    const owner = await requireOwner(db, request);
+    const { id, photoId } = z.object({ id: z.string().min(1), photoId: z.string().min(1) }).parse(request.params);
+    const { customerVisible } = z.object({ customerVisible: z.boolean() }).parse(request.body);
+    const photo = await db.photo.findFirst({ where: { id: photoId, jobId: id, organizationId: owner.organizationId }, select: { id: true, kind: true, customerVisible: true } });
+    if (!photo) notFound();
+    if (photo.kind !== 'AFTER') throw new HttpError(409, 'PHOTO_NOT_ELIGIBLE', 'Only completed vehicle photos may appear on the tracking page');
+    if (photo.customerVisible === customerVisible) return { id: photo.id, customerVisible };
+    return db.$transaction(async (tx) => {
+      const updated = await tx.photo.updateMany({ where: { id: photoId, jobId: id, organizationId: owner.organizationId, kind: 'AFTER', customerVisible: photo.customerVisible }, data: { customerVisible } });
+      if (!updated.count) throw new HttpError(409, 'PHOTO_CHANGED', 'Photo visibility changed. Refresh and try again.');
+      await audit(tx, { organizationId: owner.organizationId, actorUserId: owner.id, action: 'PHOTO_CUSTOMER_VISIBILITY_CHANGED', entityType: 'Photo', entityId: photoId, before: { customerVisible: photo.customerVisible }, after: { customerVisible }, ipAddress: request.ip });
+      return { id: photoId, customerVisible };
+    });
   });
 }

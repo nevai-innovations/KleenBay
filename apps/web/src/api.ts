@@ -22,13 +22,13 @@ export type Job = {
   messages?: { id: string; event: string; status: 'PENDING' | 'SENDING' | 'SENT' | 'FAILED'; createdAt: string; sentAt: string | null; failedAt: string | null; provider?: 'MOCK' | 'MSG91'; providerMessageId?: string | null; renderedText?: string; failureReason?: string | null; attempts?: number; deliveryAttempts?: { id: string; number: number; status: string; createdAt: string; failureReason: string | null }[] }[];
   invoice?: { id: string; invoiceNumber: string; totalPaise: number; status: string; issuedAt: string; payments: { id: string; amountPaise: number; method: string; createdAt: string; collectedBy: { id: string; name: string } }[] } | null;
   inspection?: { id: string; finalizedAt: string; recordedBy: { id: string; name: string }; damages: { id: string; location: string; type: string; description: string | null }[] } | null;
-  photos?: { id: string; kind: 'BEFORE' | 'DURING' | 'AFTER' | 'DAMAGE'; description: string | null; damageItemId: string | null; createdAt: string; uploadedBy: { id: string; name: string } }[];
+  photos?: { id: string; kind: 'BEFORE' | 'DURING' | 'AFTER' | 'DAMAGE'; description: string | null; customerVisible: boolean; damageItemId: string | null; createdAt: string; uploadedBy: { id: string; name: string } }[];
 };
 export type BoardMetrics = { inBay: number; received: number; washing: number; ready: number; late: number; collectedPaise?: number };
 export type OperationCapabilities = { allowOutstanding?: boolean; canHandover: boolean };
-export type OperationSettings = { allowOutstanding: boolean; employeeHandover: boolean; sendHandoverMessage: boolean };
+export type OperationSettings = { allowOutstanding: boolean; employeeHandover: boolean; sendHandoverMessage: boolean; showCustomerTrackingLink: boolean; showCompletedVehiclePhotos: boolean };
 export type WhatsAppSettings = { provider: 'MOCK' | 'MSG91'; enabled: boolean; senderNumber: string | null; senderDisplayName: string | null; msg91IntegratedNumberId: string | null; templateReceived: string; templateWashing: string; templateReady: string; templateHandedOver: string | null; status: string; lastVerifiedAt: string | null };
-export type TrackingStatus = { businessName: string; vehicleNumber: string; serviceName: string; status: JobStage; expectedAt: string; handedOverAt: string | null };
+export type TrackingStatus = { businessName: string; businessLogoUrl: string | null; vehicleRegistration: string; vehicleMake: string; vehicleModel: string; serviceName: string; status: JobStage; expectedCompletionAt: string; receivedAt: string; washingStartedAt: string | null; readyAt: string | null; handedOverAt: string | null; photos: { url: string }[] };
 export type AvailableEmployee = { id: string; name: string; branchId: string | null };
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {

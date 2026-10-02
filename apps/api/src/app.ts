@@ -18,6 +18,7 @@ import { registerCatalogRoutes } from './catalog.js';
 import { createMessagingProvider, MockMessagingProvider, type MessagingProvider } from './messaging.js';
 import { registerOperationsRoutes } from './operations.js';
 import { registerMediaRoutes } from './media.js';
+import { registerPublicTrackingRoutes } from './public-tracking.js';
 import { registerDailySummaryRoutes } from './daily-summary.js';
 import { registerOwnerAccountRoutes } from './owner-accounts.js';
 import { registerWhatsAppSettingsRoutes } from './whatsapp-settings.js';
@@ -155,6 +156,7 @@ export async function buildApp(config: Config, db: Db, otp: OtpProvider = create
   registerOperationsRoutes(app, db, messaging, config);
   registerWhatsAppSettingsRoutes(app, db, config);
   registerMediaRoutes(app, db, storage);
+  registerPublicTrackingRoutes(app, db, storage, config);
   registerDailySummaryRoutes(app, db);
   registerBillingRoutes(app, db, config, paymentProvider);
 

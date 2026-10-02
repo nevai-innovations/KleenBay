@@ -175,6 +175,8 @@ export const operationSettingsSchema = z.object({
   allowOutstanding: z.boolean().optional(),
   employeeHandover: z.boolean().optional(),
   sendHandoverMessage: z.boolean().optional(),
+  showCustomerTrackingLink: z.boolean().optional(),
+  showCompletedVehiclePhotos: z.boolean().optional(),
 });
 
 export const photoKinds = ['BEFORE', 'DURING', 'AFTER', 'DAMAGE'] as const;
