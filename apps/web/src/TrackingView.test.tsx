@@ -27,7 +27,10 @@ describe('public customer tracking', () => {
     expect(screen.getByText('KleenBay Test Wash')).toBeTruthy();
     expect(screen.getByText('Your vehicle has been received')).toBeTruthy();
     expect(screen.getByText('3 Oct 2026, 1:30 pm IST')).toBeTruthy();
-    state = { ...state, status: 'READY', washingStartedAt: '2026-10-03T08:15:00.000Z', readyAt: '2026-10-03T09:15:00.000Z' };
+    state = { ...state, status: 'WASHING', washingStartedAt: '2026-10-03T08:15:00.000Z' };
+    await act(async () => { vi.advanceTimersByTime(25_000); await Promise.resolve(); });
+    expect(screen.getByText('Your vehicle is being washed')).toBeTruthy();
+    state = { ...state, status: 'READY', readyAt: '2026-10-03T09:15:00.000Z' };
     await act(async () => { vi.advanceTimersByTime(25_000); await Promise.resolve(); });
     expect(screen.getByText('Your vehicle is ready for pickup.')).toBeTruthy();
     expect(urls.every((url) => url === '/api/public/tracking/secure-test-token')).toBe(true);
