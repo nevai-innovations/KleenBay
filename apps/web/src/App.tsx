@@ -1,11 +1,12 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 
 import { ArrowLeft, ChartNoAxesColumn, Columns3, ContactRound, CreditCard, History, Pencil, Settings2, Sparkles, Users } from 'lucide-react';
 import { api, patch, post, type Branch, type Employee, type Session } from './api';
 import { CustomersView, ServicesView } from './CatalogViews';
 import { BoardView, HistoryView, OperationsSettingsView } from './OperationsViews';
 import { DailySummaryView } from './DailySummaryView';
-import BillingView from './BillingView';
+import { BillingView } from './BillingView';
+import { isLegalPath, LegalView } from './LegalView';
 
 function Field({ label, ...props }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return <label className="field"><span>{label}</span><input className="input" {...props} /></label>;
@@ -115,7 +116,7 @@ function OwnerPortal({ session, onLogout }: { session: Session; onLogout: () => 
 const [section, setSection] = useState<
   'board' | 'summary' | 'history' | 'employees' |
   'customers' | 'services' | 'billing' | 'settings'
->('board');
+>(() => window.location.pathname === '/billing' ? 'billing' : 'board');
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -134,6 +135,17 @@ const [section, setSection] = useState<
       .then(([staff, locations]) => { setEmployees(staff); setBranches(locations); })
       .catch((cause) => setError(cause instanceof Error ? cause.message : 'Failed to load employees'));
   }, []);
+
+  useEffect(() => {
+    const onPopState = () => setSection(window.location.pathname === '/billing' ? 'billing' : 'board');
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  function navigate(next: typeof section) {
+    setSection(next);
+    window.history.pushState(null, '', next === 'billing' ? '/billing' : '/');
+  }
 
   async function addEmployee(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError('');
@@ -162,24 +174,34 @@ const navigation = [
 ];
 
   const sectionTitle = navigation.find((item) => item.id === section)!.label;
+  let content: ReactNode;
+  switch (section) {
+    case 'board': content = <BoardView session={session} />; break;
+    case 'summary': content = <DailySummaryView />; break;
+    case 'history': content = <HistoryView session={session} />; break;
+    case 'customers': content = <CustomersView />; break;
+    case 'services': content = <ServicesView />; break;
+    case 'billing': content = <BillingView />; break;
+    case 'settings': content = <OperationsSettingsView />; break;
+    case 'employees': content = <>
+      <div className="section-head"><div><h2>Team</h2><p>Manage who can sign in and work on vehicles.</p></div><span className="count-chip">{employees.filter((employee) => employee.active).length} active</span></div>
+      <div className="team-layout"><section className="panel team-list" aria-label="Employees"><div className="team-list-head"><strong>Employees</strong><span>{employees.length}</span></div>
+        {employees.length === 0 ? <div className="team-empty">No employees yet.</div> : employees.map((employee) => <div className="team-row" key={employee.id}><span className="who-dot">{employee.name.slice(0, 1)}</span><div className="team-person"><strong>{employee.name}</strong><small>{employee.mobile}{employee.branchName ? ` · ${employee.branchName}` : ''}</small></div><span className={`status-pill ${employee.active ? 'is-active' : ''}`}>{employee.active ? 'Active' : 'Inactive'}</span><button className="btn small" onClick={() => void toggle(employee)}>{employee.active ? 'Deactivate' : 'Activate'}</button></div>)}</section>
+        <form className="panel add-form" onSubmit={addEmployee}><h3>Add Employee</h3><Field label="Employee name" value={name} onChange={(event) => setName(event.target.value)} required /><Field label="Mobile number" type="tel" inputMode="tel" value={mobile} onChange={(event) => setMobile(event.target.value)} required />
+          {branches.length > 1 && <label className="field"><span>Branch</span><select className="input" value={branchId} onChange={(event) => setBranchId(event.target.value)}><option value="">All branches</option>{branches.map((branch) => <option value={branch.id} key={branch.id}>{branch.name}</option>)}</select></label>}
+          <button className="btn primary block" disabled={busy}>Add employee</button></form></div>
+      {error && <div className="portal-error" role="alert">{error}</div>}
+    </>; break;
+  }
 
   return <div className="shell">
     <aside className="rail"><Brand />
-      <nav className="rail-nav" aria-label="Owner navigation">{navigation.map(({ id, label, icon: Icon }) => <button type="button" key={id} className={section === id ? 'active' : ''} onClick={() => setSection(id)}><Icon size={18} /><span>{label}</span></button>)}</nav>
+      <nav className="rail-nav" aria-label="Owner navigation">{navigation.map(({ id, label, icon: Icon }) => <button type="button" key={id} className={section === id ? 'active' : ''} onClick={() => navigate(id)}><Icon size={18} /><span>{label}</span></button>)}</nav>
       <div className="rail-foot"><span className="who-dot">{session.user.name.slice(0, 1)}</span><button className="text-action" onClick={onLogout}>Sign out</button></div>
     </aside>
     <div className="frame"><header className="topbar"><div className="topbar-identity"><BrandLogo mobile /><div className="topbar-title"><h1>{sectionTitle}</h1>{section === 'summary' && <p>Today</p>}</div></div><button className="btn ghost logout-mobile" onClick={onLogout}>Sign out</button></header>
-      <nav className="portal-tabs owner-tabs" aria-label="Owner sections">{navigation.map(({ id, label }) => <button type="button" key={id} className={section === id ? 'active' : ''} onClick={() => setSection(id)}>{label}</button>)}</nav>
-      <main className="portal-main">{section === 'board' ? <BoardView session={session} /> : section === 'summary' ? <DailySummaryView /> : section === 'history' ? <HistoryView session={session} /> : section === 'employees' ? <><div className="section-head"><div><h2>Team</h2><p>Manage who can sign in and work on vehicles.</p></div><span className="count-chip">{employees.filter((employee) => employee.active).length} active</span></div>
-        <div className="team-layout"><section className="panel team-list" aria-label="Employees"><div className="team-list-head"><strong>Employees</strong><span>{employees.length}</span></div>
-          {employees.length === 0 ? <div className="team-empty">No employees yet.</div> : employees.map((employee) => <div className="team-row" key={employee.id}><span className="who-dot">{employee.name.slice(0, 1)}</span><div className="team-person"><strong>{employee.name}</strong><small>{employee.mobile}{employee.branchName ? ` · ${employee.branchName}` : ''}</small></div><span className={`status-pill ${employee.active ? 'is-active' : ''}`}>{employee.active ? 'Active' : 'Inactive'}</span><button className="btn small" onClick={() => void toggle(employee)}>{employee.active ? 'Deactivate' : 'Activate'}</button></div>)}</section>
-          <form className="panel add-form" onSubmit={addEmployee}><h3>Add Employee</h3><Field label="Employee name" value={name} onChange={(event) => setName(event.target.value)} required /><Field label="Mobile number" type="tel" inputMode="tel" value={mobile} onChange={(event) => setMobile(event.target.value)} required />
-            {branches.length > 1 && <label className="field"><span>Branch</span><select className="input" value={branchId} onChange={(event) => setBranchId(event.target.value)}><option value="">All branches</option>{branches.map((branch) => <option value={branch.id} key={branch.id}>{branch.name}</option>)}</select></label>}
-            <button className="btn primary block" disabled={busy}>Add employee</button></form></div>
-
-{error && <div className="portal-error" role="alert">{error}</div>}</> : section === 'customers' ? <CustomersView /> : section === 'services' ? <ServicesView /> : section === 'billing' ? <BillingView /> : <OperationsSettingsView />}
-
-      </main></div>
+      <nav className="portal-tabs owner-tabs" aria-label="Owner sections">{navigation.map(({ id, label }) => <button type="button" key={id} className={section === id ? 'active' : ''} onClick={() => navigate(id)}>{label}</button>)}</nav>
+      <main className="portal-main">{content}</main></div>
   </div>;
 }
 
@@ -202,7 +224,9 @@ export default function App() {
     try { await post('/auth/logout', {}); setSession(null); }
     catch (cause) { setLogoutError(cause instanceof Error ? cause.message : 'Could not sign out'); }
   }
+  if (isLegalPath(window.location.pathname)) return <LegalView path={window.location.pathname} />;
   if (loading) return <div className="loading-screen">KleenBay</div>;
   if (!session) return <Login onLogin={setSession} />;
+  if (window.location.pathname === '/billing' && session.user.role !== 'OWNER') return <main className="login-page"><div className="login-box"><h1>Access denied</h1><p>Billing is available to owners only.</p><button className="btn" onClick={() => { window.history.replaceState(null, '', '/'); window.location.reload(); }}>Back to board</button></div></main>;
   return <>{session.user.role === 'OWNER' ? <OwnerPortal session={session} onLogout={() => void logout()} /> : <EmployeePortal session={session} onLogout={() => void logout()} />}{logoutError && <div className="global-error" role="alert">{logoutError}</div>}</>;
 }

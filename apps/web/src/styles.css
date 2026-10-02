@@ -446,7 +446,6 @@
   width: 100%;
   height: 100%;
   max-width: 100%;
-  transform: none;
   object-fit: contain;
   transform: translateY(20px);
 }
@@ -469,12 +468,29 @@
 }
 
 /* Compact login card */
-.login-page .login-wrap > .login-card {
+.login-page .login-wrap > .login-box {
   padding: 20px;
 }
 
-.login-page .login-wrap > .login-brand {
-  position: relative;
-  top: -10px;
-  margin-bottom: -px;
-}
+.billing-page{max-width:900px;margin:0 auto;padding-bottom:36px}
+.billing-panel{padding:24px;margin-bottom:16px}
+.billing-panel h3{margin:0 0 12px;font-size:20px}
+.billing-heading{display:flex;justify-content:space-between;align-items:start;gap:16px}
+.billing-heading strong{display:block;color:var(--money);font-size:28px}
+.billing-note{color:var(--text-2);font-size:14px}
+.billing-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:12px 0}
+.billing-facts p{display:grid;gap:4px;margin:0;font-size:13px;color:var(--text-2)}
+.billing-facts strong{color:var(--text);font-size:16px}
+.billing-checkout{display:flex;align-items:end;gap:12px;margin:20px 0}
+.billing-checkout .field{min-width:220px;flex:1}
+.billing-checkout .btn{min-height:48px}
+.billing-history{display:grid;gap:0}
+.billing-payment{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:14px 0;border-top:1px solid var(--hair)}
+.billing-payment div{display:grid;gap:3px}
+.billing-payment div span,.billing-payment small{color:var(--text-2);font-size:12px}
+.billing-payment small{grid-column:1/-1;overflow-wrap:anywhere}
+.billing-policies{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:22px;padding-top:16px;border-top:1px solid var(--hair);font-size:13px}
+.billing-policies a{color:var(--accent)}
+.legal-page{max-width:540px}
+.legal-page h1{font-size:24px}
+@media(max-width:680px){.billing-panel{padding:18px}.billing-heading{flex-wrap:wrap}.billing-facts{grid-template-columns:1fr}.billing-checkout{display:grid}.billing-checkout .field{min-width:0}.billing-checkout .btn{width:100%}}

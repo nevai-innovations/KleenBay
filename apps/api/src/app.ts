@@ -20,8 +20,10 @@ import { registerOperationsRoutes } from './operations.js';
 import { registerMediaRoutes } from './media.js';
 import { registerDailySummaryRoutes } from './daily-summary.js';
 import { LocalStorageProvider, type StorageProvider } from './storage.js';
+import { createPaymentProvider, type PaymentProvider } from './payu.js';
+import { registerBillingRoutes } from './billing.js';
 
-export async function buildApp(config: Config, db: Db, otp: OtpProvider = createOtpProvider(config), messaging: MessagingProvider = config.stagingMode ? new DisabledMessagingProvider() : new LocalMessagingProvider(), storage: StorageProvider = new LocalStorageProvider()) {
+export async function buildApp(config: Config, db: Db, otp: OtpProvider = createOtpProvider(config), messaging: MessagingProvider = config.stagingMode ? new DisabledMessagingProvider() : new LocalMessagingProvider(), storage: StorageProvider = new LocalStorageProvider(), paymentProvider: PaymentProvider | null = createPaymentProvider(config)) {
   if (config.NODE_ENV === 'production' && (messaging instanceof LocalMessagingProvider || (!config.stagingMode && messaging instanceof DisabledMessagingProvider))) throw new Error('Configure a production messaging provider before startup');
   if (config.NODE_ENV === 'production' && !config.stagingMode && storage instanceof LocalStorageProvider) throw new Error('Configure a production storage provider before startup');
   const app = Fastify({ logger: { level: config.LOG_LEVEL }, trustProxy: config.TRUST_PROXY_HOPS > 0 });
@@ -30,6 +32,7 @@ export async function buildApp(config: Config, db: Db, otp: OtpProvider = create
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(rateLimit, { max: 120, timeWindow: '1 minute' });
   await app.register(multipart, { limits: { files: 1, fileSize: 8 * 1024 * 1024 } });
+  app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_request, body, done) => done(null, Object.fromEntries(new URLSearchParams(body.toString()))));
 
   app.addHook('onRequest', async (request) => {
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) && request.cookies.kleenbay_session) {
@@ -175,6 +178,7 @@ export async function buildApp(config: Config, db: Db, otp: OtpProvider = create
   registerOperationsRoutes(app, db, messaging);
   registerMediaRoutes(app, db, storage);
   registerDailySummaryRoutes(app, db);
+  registerBillingRoutes(app, db, config, paymentProvider);
 
   return app;
 }
