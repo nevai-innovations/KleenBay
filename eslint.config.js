@@ -3,7 +3,7 @@ import globals from 'globals';
 import reactHooks from 'eslint-plugin-react-hooks';
 
 export default tseslint.config(
-  { ignores: ['**/node_modules/**', '**/dist/**', 'apps/api/src/generated/**', 'prototype/**', 'docs/**'] },
+  { ignores: ['**/node_modules/**', '**/dist/**', 'apps/api/src/generated/**', 'prototype/**', 'docs/**', '.local-data/**', 'outputs/**'] },
   ...tseslint.configs.recommended,
   {
     files: ['apps/**/*.{ts,tsx}', 'packages/**/*.{ts,tsx}'],

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { hash } from '@node-rs/argon2';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app.js';
@@ -10,11 +10,15 @@ import type { StorageProvider } from '../src/storage.js';
 
 const testUrl = assertLocalTestDatabase(process.env.TEST_DATABASE_URL);
 const db = createDb(testUrl);
-const config = { ...getConfig(), NODE_ENV: 'test' as const, devOtp: true, DEV_OTP_ENABLED: 'true' as const, LOG_LEVEL: 'silent' };
+const config = { ...getConfig(), NODE_ENV: 'test' as const, devOtp: true, DEV_OTP_ENABLED: 'true' as const, DEV_OTP_FIXED_CODE: '123456', LOG_LEVEL: 'silent' };
 const slug = `operations-${randomUUID()}`;
+const employeeMobile = String(9000000000 + randomInt(900000000));
+const employeeMobile2 = String(Number(employeeMobile) + 1);
+const employeeE164 = `+91${employeeMobile}`;
+const employeeE1642 = `+91${employeeMobile2}`;
 const sent: string[] = [];
 let failEvent: string | null = null;
-const messaging: MessagingProvider = { async send({ idempotencyKey }) {
+const messaging: MessagingProvider = { name: 'MOCK', async send({ idempotencyKey }) {
   if (failEvent && idempotencyKey.endsWith(failEvent)) { failEvent = null; throw new Error('Simulated provider failure'); }
   sent.push(idempotencyKey);
   return { providerMessageId: `test:${idempotencyKey}` };
@@ -46,7 +50,8 @@ const privateFields = new Set([
   'subtotalPaise', 'taxPaise', 'totalPaise', 'paidPaise', 'outstandingPaise', 'paymentStatus',
   'invoice', 'payments', 'amountPaise', 'paymentMethod', 'paymentReference', 'collectionByMethod',
   'basePricePaise', 'pricePaise', 'taxRateBps', 'discountPaise', 'allowOutstanding',
-  'recipient', 'renderedText', 'providerMessageId', 'failureReason',
+  'recipient', 'renderedText', 'provider', 'templateKey', 'providerMessageId', 'failureReason', 'nextRetryAt', 'deliveryAttempts',
+  'trackingTokenHash', 'trackingTokenCiphertext', 'senderNumber', 'senderDisplayName',
 ]);
 
 function expectOperationalOnly(value: unknown) {
@@ -70,17 +75,17 @@ beforeAll(async () => {
   branchId = (await db.branch.create({ data: { organizationId, name: 'Main' } })).id;
   serviceId = (await db.service.create({ data: { organizationId, name: 'Premium Wash', category: 'Wash', basePricePaise: 59900, estimatedMinutes: 45 } })).id;
   await db.user.create({ data: { organizationId, branchId, role: 'OWNER', name: 'Owner', username: 'owner', passwordHash: await hash('test-password') } });
-  employeeId = (await db.user.create({ data: { organizationId, branchId, role: 'EMPLOYEE', name: 'Ravi', employee: { create: { mobile: '+919876543210' } } } })).id;
-  await db.user.create({ data: { organizationId, branchId, role: 'EMPLOYEE', name: 'Salim', employee: { create: { mobile: '+919876543211' } } } });
+  employeeId = (await db.user.create({ data: { organizationId, branchId, role: 'EMPLOYEE', name: 'Ravi', employee: { create: { mobile: employeeE164 } } } })).id;
+  await db.user.create({ data: { organizationId, branchId, role: 'EMPLOYEE', name: 'Salim', employee: { create: { mobile: employeeE1642 } } } });
   app = await buildApp(config, db, undefined, messaging, storage);
   await app.ready();
   const owner = await request('POST', '/api/auth/owner/login', { login: 'owner', password: 'test-password' });
   ownerCookie = `${owner.cookies[0]!.name}=${owner.cookies[0]!.value}`;
-  await request('POST', '/api/auth/employee/request-otp', { mobile: '9876543210' });
-  const employee = await request('POST', '/api/auth/employee/verify-otp', { mobile: '9876543210', code: config.DEV_OTP_CODE });
+  await request('POST', '/api/auth/employee/request-otp', { mobile: employeeMobile });
+  const employee = await request('POST', '/api/auth/employee/verify-otp', { mobile: employeeMobile, code: config.DEV_OTP_FIXED_CODE });
   employeeCookie = `${employee.cookies[0]!.name}=${employee.cookies[0]!.value}`;
-  await request('POST', '/api/auth/employee/request-otp', { mobile: '9876543211' });
-  const otherEmployee = await request('POST', '/api/auth/employee/verify-otp', { mobile: '9876543211', code: config.DEV_OTP_CODE });
+  await request('POST', '/api/auth/employee/request-otp', { mobile: employeeMobile2 });
+  const otherEmployee = await request('POST', '/api/auth/employee/verify-otp', { mobile: employeeMobile2, code: config.DEV_OTP_FIXED_CODE });
   otherEmployeeCookie = `${otherEmployee.cookies[0]!.name}=${otherEmployee.cookies[0]!.value}`;
 });
 
@@ -96,11 +101,24 @@ describe('vehicle operations', () => {
     expect(created.json().totalPaise).toBe(59900);
     expect((await request('POST', '/api/jobs/check-in', input, ownerCookie)).json().id).toBe(id);
     await vi.waitFor(async () => expect(await db.message.count({ where: { jobId: id, event: 'VEHICLE_RECEIVED', status: 'SENT' } })).toBe(1));
+    const received = await db.message.findUniqueOrThrow({ where: { jobId_event: { jobId: id, event: 'VEHICLE_RECEIVED' } } });
+    expect(received).toMatchObject({ organizationId, branchId, recipient: '+919845612399', templateKey: 'VEHICLE_RECEIVED', provider: 'MOCK', attempts: 1 });
+    expect(received.renderedText).toContain('Test Driver');
+    const token = /\/track\/([A-Za-z0-9_-]{43})/.exec(received.renderedText)?.[1];
+    expect(token).toBeTruthy();
+    expect(received.renderedText).toContain(config.APP_ORIGIN);
+    expect(token).not.toBe(id);
+    expect((await db.job.findUniqueOrThrow({ where: { id } })).trackingTokenCiphertext).not.toContain(token);
+    expect((await request('GET', `/api/public/track/${token}`)).json()).toMatchObject({ businessName: 'Operations Test', vehicleNumber: 'KL29AB1234', status: 'RECEIVED' });
+    expect((await request('GET', '/api/public/track/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')).statusCode).toBe(404);
     expect((await request('POST', `/api/jobs/${id}/advance`, { to: 'READY' }, ownerCookie)).statusCode).toBe(409);
+    expect(await db.message.count({ where: { jobId: id } })).toBe(1);
     expect((await request('POST', `/api/jobs/${id}/advance`, { to: 'WASHING' }, ownerCookie)).statusCode).toBe(200);
     expect((await request('POST', `/api/jobs/${id}/advance`, { to: 'WASHING' }, ownerCookie)).statusCode).toBe(200);
     expect((await request('POST', `/api/jobs/${id}/advance`, { to: 'READY' }, ownerCookie)).statusCode).toBe(200);
     await vi.waitFor(async () => expect(await db.message.count({ where: { jobId: id, status: 'SENT' } })).toBe(3));
+    expect((await db.message.findMany({ where: { jobId: id }, orderBy: { createdAt: 'asc' } })).map((message) => message.event)).toEqual(['VEHICLE_RECEIVED', 'WASH_STARTED', 'VEHICLE_READY']);
+    expect((await db.message.findMany({ where: { jobId: id } })).every((message) => message.renderedText.includes(`/track/${token}`) || message.event === 'VEHICLE_HANDED_OVER')).toBe(true);
     expect((await request('GET', '/api/jobs?view=active', undefined, ownerCookie)).json().some((job: { id: string }) => job.id === id)).toBe(true);
     const handed = await request('POST', `/api/jobs/${id}/handover`, { paymentAmountPaise: 39900, paymentMethod: 'UPI' }, ownerCookie);
     expect(handed.statusCode).toBe(200);
@@ -112,6 +130,7 @@ describe('vehicle operations', () => {
     expect((await request('GET', '/api/jobs?view=history&q=KL29AB1234', undefined, ownerCookie)).json().some((job: { id: string }) => job.id === id)).toBe(true);
     expect(await db.jobStageHistory.count({ where: { jobId: id } })).toBe(4);
     expect(await db.message.count({ where: { jobId: id } })).toBe(3);
+    expect(await db.messageAttempt.count({ where: { message: { jobId: id } } })).toBe(3);
     expect(sent.filter((key) => key.startsWith(`${id}:`))).toHaveLength(3);
     const paid = await request('POST', `/api/jobs/${id}/payments`, { idempotencyKey: randomUUID(), amountPaise: 20000, method: 'CASH' }, ownerCookie);
     expect(paid.json().paymentStatus).toBe('PAID');
@@ -198,10 +217,35 @@ describe('vehicle operations', () => {
     await request('POST', `/api/jobs/${id}/advance`, { to: 'READY' }, ownerCookie);
     await vi.waitFor(async () => expect(await db.message.count({ where: { jobId: id, event: 'VEHICLE_READY', status: 'FAILED' } })).toBe(1));
     const message = await db.message.findUniqueOrThrow({ where: { jobId_event: { jobId: id, event: 'VEHICLE_READY' } } });
+    expect(message).toMatchObject({ attempts: 1, failureReason: 'Simulated provider failure' });
+    expect(message.nextRetryAt).toBeTruthy();
+    expect((await db.job.findUniqueOrThrow({ where: { id } })).status).toBe('READY');
     expect((await request('POST', `/api/jobs/${id}/messages/${message.id}/retry`, {}, employeeCookie)).statusCode).toBe(403);
     expect((await request('POST', `/api/jobs/${id}/messages/${message.id}/retry`, {}, ownerCookie)).statusCode).toBe(200);
     await vi.waitFor(async () => expect(await db.message.count({ where: { jobId: id, event: 'VEHICLE_READY', status: 'SENT' } })).toBe(1));
     expect(await db.message.count({ where: { jobId: id, event: 'VEHICLE_READY' } })).toBe(1);
+    expect((await db.messageAttempt.findMany({ where: { messageId: message.id }, orderBy: { number: 'asc' } })).map((attempt) => attempt.status)).toEqual(['FAILED', 'SENT']);
+    expect((await db.message.findUniqueOrThrow({ where: { id: message.id } })).attempts).toBe(2);
+    expect((await request('POST', `/api/jobs/${id}/messages/${message.id}/retry`, {}, ownerCookie)).statusCode).toBe(409);
+  });
+
+  it('does not queue messages when customer updates are disabled', async () => {
+    const created = await request('POST', '/api/jobs/check-in', { ...checkIn('KL29AB1240'), notify: false }, ownerCookie);
+    expect(created.statusCode).toBe(201);
+    const id = created.json().id;
+    expect((await request('POST', `/api/jobs/${id}/advance`, { to: 'WASHING' }, ownerCookie)).statusCode).toBe(200);
+    expect((await request('POST', `/api/jobs/${id}/advance`, { to: 'READY' }, ownerCookie)).statusCode).toBe(200);
+    expect(await db.message.count({ where: { jobId: id } })).toBe(0);
+  });
+
+  it('does not expose another business message or retry endpoint', async () => {
+    const otherOrg = await db.organization.create({ data: { slug: `other-${randomUUID()}`, name: 'Other Business' } });
+    await db.user.create({ data: { organizationId: otherOrg.id, role: 'OWNER', name: 'Other Owner', username: 'other', passwordHash: await hash('other-password') } });
+    const login = await app.inject({ method: 'POST', url: '/api/auth/owner/login', headers: { 'x-organization-slug': otherOrg.slug }, payload: { login: 'other', password: 'other-password' } });
+    const cookie = `${login.cookies[0]!.name}=${login.cookies[0]!.value}`;
+    const message = await db.message.findFirstOrThrow({ where: { organizationId } });
+    expect((await request('GET', `/api/jobs/${message.jobId}`, undefined, cookie)).statusCode).toBe(404);
+    expect((await request('POST', `/api/jobs/${message.jobId}/messages/${message.id}/retry`, {}, cookie)).statusCode).toBe(404);
   });
 
   it('finalizes one condition record and validates tenant-scoped photos', async () => {
@@ -241,5 +285,74 @@ describe('vehicle operations', () => {
     await vi.waitFor(async () => expect(await db.message.count({ where: { jobId: id, event: 'VEHICLE_HANDED_OVER', status: 'SENT' } })).toBe(1));
     expect(await db.message.count({ where: { jobId: id, event: 'VEHICLE_HANDED_OVER' } })).toBe(1);
     expect(await db.auditLog.count({ where: { organizationId, action: 'OPERATIONS_SETTINGS_UPDATED', entityId: organizationId } })).toBeGreaterThan(0);
+  });
+
+  it('scopes WhatsApp settings and sender snapshots to the owner organization', async () => {
+    expect((await request('GET', '/api/whatsapp/settings', undefined, employeeCookie)).statusCode).toBe(403);
+    expect((await request('PATCH', '/api/whatsapp/settings', { enabled: false }, employeeCookie)).statusCode).toBe(403);
+    expect((await request('POST', '/api/whatsapp/test-connection', {}, employeeCookie)).statusCode).toBe(403);
+    expect((await request('POST', '/api/whatsapp/test-failure', {}, employeeCookie)).statusCode).toBe(403);
+    const updated = await request('PATCH', '/api/whatsapp/settings', { senderNumber: '0919876543210', senderDisplayName: 'Main Bay', templateReceived: 'received_test' }, ownerCookie);
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({ provider: 'MOCK', senderNumber: '+919876543210', senderDisplayName: 'Main Bay', templateReceived: 'received_test' });
+    expect(updated.body).not.toContain('credentialRef');
+    const test = await request('POST', '/api/whatsapp/test-connection', {}, ownerCookie);
+    expect(test.json()).toMatchObject({ delivered: false, status: 'MOCK_ACTIVE' });
+
+    const otherOrg = await db.organization.create({ data: { slug: `message-tenant-${randomUUID()}`, name: 'Second Wash' } });
+    await db.user.create({ data: { organizationId: otherOrg.id, role: 'OWNER', name: 'Second Owner', username: 'second', passwordHash: await hash('other-password') } });
+    const login = await app.inject({ method: 'POST', url: '/api/auth/owner/login', headers: { 'x-organization-slug': otherOrg.slug }, payload: { login: 'second', password: 'other-password' } });
+    const otherCookie = `${login.cookies[0]!.name}=${login.cookies[0]!.value}`;
+    expect((await request('GET', '/api/whatsapp/settings', undefined, otherCookie)).json().senderNumber).toBeNull();
+    expect((await request('PATCH', '/api/whatsapp/settings', { senderNumber: '9123456789', senderDisplayName: 'Second Bay' }, otherCookie)).statusCode).toBe(200);
+    expect((await request('GET', '/api/whatsapp/settings', undefined, ownerCookie)).json().senderDisplayName).toBe('Main Bay');
+
+    const created = await request('POST', '/api/jobs/check-in', checkIn('KL29AB1260'), ownerCookie);
+    expect(created.statusCode).toBe(201);
+    const id = created.json().id;
+    await vi.waitFor(async () => expect(await db.message.count({ where: { jobId: id, status: 'SENT' } })).toBe(1));
+    const message = await db.message.findFirstOrThrow({ where: { jobId: id } });
+    expect(message).toMatchObject({ organizationId, senderNumber: '+919876543210', senderDisplayName: 'Main Bay', templateKey: 'received_test', provider: 'MOCK' });
+    expect(message.renderedText).toContain('Operations Test');
+    expect((await request('GET', `/api/jobs/${id}`, undefined, otherCookie)).statusCode).toBe(404);
+    expect((await request('POST', `/api/jobs/${id}/messages/${message.id}/retry`, {}, otherCookie)).statusCode).toBe(404);
+    const suppressed = await request('PATCH', '/api/whatsapp/settings', { enabled: false }, ownerCookie);
+    expect(suppressed.statusCode).toBe(200);
+    const disabledJob = await request('POST', '/api/jobs/check-in', checkIn('KL29AB1261'), ownerCookie);
+    expect(disabledJob.statusCode).toBe(201);
+    expect(await db.message.count({ where: { jobId: disabledJob.json().id } })).toBe(0);
+    expect((await request('PATCH', '/api/whatsapp/settings', { enabled: true }, ownerCookie)).statusCode).toBe(200);
+    expect(await db.auditLog.count({ where: { organizationId, action: 'WHATSAPP_SETTINGS_UPDATED' } })).toBeGreaterThan(0);
+  });
+
+  it('fails one tenant mock delivery without rolling back check-in, then retries', async () => {
+    expect((await request('POST', '/api/whatsapp/test-failure', {}, ownerCookie)).json().status).toBe('armed');
+    const created = await request('POST', '/api/jobs/check-in', checkIn('KL29AB1262'), ownerCookie);
+    expect(created.statusCode).toBe(201);
+    const id = created.json().id;
+    await vi.waitFor(async () => expect(await db.message.count({ where: { jobId: id, status: 'FAILED' } })).toBe(1));
+    expect((await db.job.findUniqueOrThrow({ where: { id } })).status).toBe('RECEIVED');
+    const message = await db.message.findFirstOrThrow({ where: { jobId: id } });
+    expect((await request('POST', `/api/jobs/${id}/messages/${message.id}/retry`, {}, ownerCookie)).statusCode).toBe(200);
+    await vi.waitFor(async () => expect(await db.message.count({ where: { id: message.id, status: 'SENT', attempts: 2 } })).toBe(1));
+    expect(await db.message.count({ where: { jobId: id, event: 'VEHICLE_RECEIVED' } })).toBe(1);
+    expect(await db.auditLog.count({ where: { organizationId, action: 'WHATSAPP_MOCK_FAILURE_ARMED' } })).toBeGreaterThan(0);
+  });
+
+  it('resolves the queued provider from organization settings and fails closed for unconnected MSG91', async () => {
+    await db.organizationWhatsAppConfig.update({ where: { organizationId }, data: { provider: 'MSG91', status: 'NOT_CONNECTED' } });
+    try {
+      const created = await request('POST', '/api/jobs/check-in', checkIn('KL29AB1263'), ownerCookie);
+      expect(created.statusCode).toBe(201);
+      const id = created.json().id;
+      await vi.waitFor(async () => expect(await db.message.count({ where: { jobId: id, status: 'FAILED', provider: 'MSG91' } })).toBe(1));
+      const message = await db.message.findFirstOrThrow({ where: { jobId: id } });
+      expect(message.failureReason).toBe('Provider delivery failed');
+      expect((await db.job.findUniqueOrThrow({ where: { id } })).status).toBe('RECEIVED');
+      expect((await request('POST', '/api/whatsapp/test-connection', {}, ownerCookie)).statusCode).toBe(409);
+      expect((await request('PATCH', '/api/whatsapp/settings', { enabled: false }, ownerCookie)).statusCode).toBe(409);
+    } finally {
+      await db.organizationWhatsAppConfig.update({ where: { organizationId }, data: { provider: 'MOCK', status: 'MOCK_ACTIVE' } });
+    }
   });
 });

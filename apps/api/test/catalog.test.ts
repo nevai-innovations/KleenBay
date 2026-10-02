@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { hash } from '@node-rs/argon2';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
@@ -9,8 +9,10 @@ import { assertLocalTestDatabase } from '../src/database-target.js';
 
 const testUrl = assertLocalTestDatabase(process.env.TEST_DATABASE_URL);
 const db = createDb(testUrl);
-const config = { ...getConfig(), NODE_ENV: 'test' as const, devOtp: true, DEV_OTP_ENABLED: 'true' as const, LOG_LEVEL: 'error' };
+const config = { ...getConfig(), NODE_ENV: 'test' as const, devOtp: true, DEV_OTP_ENABLED: 'true' as const, DEV_OTP_FIXED_CODE: '123456', LOG_LEVEL: 'error' };
 const slug = `catalog-${randomUUID()}`;
+const employeeMobile = String(9000000000 + randomInt(900000000));
+const employeeE164 = `+91${employeeMobile}`;
 const origin = config.APP_ORIGIN;
 let app: Awaited<ReturnType<typeof buildApp>>;
 let organizationId: string;
@@ -33,13 +35,13 @@ beforeAll(async () => {
   branchId = branch.id;
   otherBranchId = (await db.branch.create({ data: { organizationId, name: 'Second' } })).id;
   await db.user.create({ data: { organizationId, branchId, role: 'OWNER', name: 'Owner', username: 'owner', passwordHash: await hash('catalog-password') } });
-  await db.user.create({ data: { organizationId, branchId, role: 'EMPLOYEE', name: 'Ravi', employee: { create: { mobile: '+919876543210' } } } });
+  await db.user.create({ data: { organizationId, branchId, role: 'EMPLOYEE', name: 'Ravi', employee: { create: { mobile: employeeE164 } } } });
   app = await buildApp(config, db);
   await app.ready();
   const owner = await request('POST', '/api/auth/owner/login', { login: 'owner', password: 'catalog-password' });
   ownerCookie = `${owner.cookies[0]!.name}=${owner.cookies[0]!.value}`;
-  await request('POST', '/api/auth/employee/request-otp', { mobile: '9876543210' });
-  const employee = await request('POST', '/api/auth/employee/verify-otp', { mobile: '9876543210', code: config.DEV_OTP_CODE });
+  await request('POST', '/api/auth/employee/request-otp', { mobile: employeeMobile });
+  const employee = await request('POST', '/api/auth/employee/verify-otp', { mobile: employeeMobile, code: config.DEV_OTP_FIXED_CODE });
   employeeCookie = `${employee.cookies[0]!.name}=${employee.cookies[0]!.value}`;
 });
 

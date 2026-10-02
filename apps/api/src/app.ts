@@ -1,38 +1,51 @@
-import Fastify from 'fastify';
+import Fastify, { LogController } from 'fastify';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
-import { hash, verify } from '@node-rs/argon2';
-import { randomInt } from 'node:crypto';
+import { verify } from '@node-rs/argon2';
 import { z, ZodError } from 'zod';
-import { employeeSchema, employeeUpdateSchema, ownerLoginSchema, otpRequestSchema, otpVerifySchema } from '@carwash/shared';
+import { employeeSchema, employeeUpdateSchema, ownerLoginSchema } from '@carwash/shared';
 import type { Config } from './config.js';
 import type { Db } from './db.js';
 import { audit } from './audit.js';
 import { currentUser, requireOwner, revokeSession, startSession } from './auth.js';
 import { HttpError, notFound } from './errors.js';
 import { createOtpProvider, type OtpProvider } from './otp.js';
+import { registerEmployeeOtpRoutes } from './employee-otp.js';
 import { registerCatalogRoutes } from './catalog.js';
-import { DisabledMessagingProvider, LocalMessagingProvider, type MessagingProvider } from './messaging.js';
+import { createMessagingProvider, MockMessagingProvider, type MessagingProvider } from './messaging.js';
 import { registerOperationsRoutes } from './operations.js';
 import { registerMediaRoutes } from './media.js';
 import { registerDailySummaryRoutes } from './daily-summary.js';
+import { registerOwnerAccountRoutes } from './owner-accounts.js';
+import { registerWhatsAppSettingsRoutes } from './whatsapp-settings.js';
 import { LocalStorageProvider, type StorageProvider } from './storage.js';
+import { createPaymentProvider, type PaymentProvider } from './payu.js';
+import { registerBillingRoutes } from './billing.js';
 
-export async function buildApp(config: Config, db: Db, otp: OtpProvider = createOtpProvider(config), messaging: MessagingProvider = config.stagingMode ? new DisabledMessagingProvider() : new LocalMessagingProvider(), storage: StorageProvider = new LocalStorageProvider()) {
-  if (config.NODE_ENV === 'production' && (messaging instanceof LocalMessagingProvider || (!config.stagingMode && messaging instanceof DisabledMessagingProvider))) throw new Error('Configure a production messaging provider before startup');
+class RouteOnlyLogController extends LogController {
+  constructor() { super({ disableRequestLogging: true }); }
+}
+
+export async function buildApp(config: Config, db: Db, otp: OtpProvider = createOtpProvider(config), messaging: MessagingProvider = createMessagingProvider(config), storage: StorageProvider = new LocalStorageProvider(), paymentProvider: PaymentProvider | null = createPaymentProvider(config)) {
+  if (config.NODE_ENV === 'production' && !config.stagingMode && messaging instanceof MockMessagingProvider) throw new Error('Configure a production messaging provider before startup');
   if (config.NODE_ENV === 'production' && !config.stagingMode && storage instanceof LocalStorageProvider) throw new Error('Configure a production storage provider before startup');
-  const app = Fastify({ logger: { level: config.LOG_LEVEL }, trustProxy: config.TRUST_PROXY_HOPS > 0 });
+  const app = Fastify({ logger: { level: config.LOG_LEVEL }, logController: new RouteOnlyLogController(), trustProxy: config.TRUST_PROXY_HOPS > 0 });
   await app.register(cookie);
   await app.register(cors, { origin: config.APP_ORIGIN, credentials: true });
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(rateLimit, { max: 120, timeWindow: '1 minute' });
   await app.register(multipart, { limits: { files: 1, fileSize: 8 * 1024 * 1024 } });
+  app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_request, body, done) => done(null, Object.fromEntries(new URLSearchParams(body.toString()))));
+
+  app.addHook('onResponse', async (request, reply) => {
+    request.log.info({ requestId: request.id, method: request.method, route: request.routeOptions.url ?? 'unmatched', statusCode: reply.statusCode }, 'Request completed');
+  });
 
   app.addHook('onRequest', async (request) => {
-    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) && request.cookies.kleenbay_session) {
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) && (request.cookies.kleenbay_session || request.url.startsWith('/api/auth/employee/') || request.url === '/api/auth/owner/setup')) {
       if (request.headers.origin !== config.APP_ORIGIN) throw new HttpError(403, 'BAD_ORIGIN', 'Invalid request origin');
     }
   });
@@ -55,12 +68,16 @@ export async function buildApp(config: Config, db: Db, otp: OtpProvider = create
 
   app.post('/api/auth/owner/login', { config: { rateLimit: { max: 8, timeWindow: '10 minutes' } } }, async (request, reply) => {
     const input = ownerLoginSchema.parse(request.body);
-    const orgSlug = z.string().min(2).max(100).parse(request.headers['x-organization-slug']);
-    const organization = await db.organization.findUnique({ where: { slug: orgSlug } });
-    const user = organization && await db.user.findFirst({ where: { organizationId: organization.id, role: 'OWNER', active: true, OR: [{ username: input.login.toLowerCase() }, { email: input.login.toLowerCase() }] } });
+    const login = input.login.toLowerCase();
+    const orgSlug = request.headers['x-organization-slug'];
+    const where = { role: 'OWNER' as const, active: true, ...(login.includes('@') ? { email: login } : { username: login }) };
+    const matches = await db.user.findMany({ where, include: { organization: true }, take: 2 });
+    const user = matches.length === 1 ? matches[0] : !login.includes('@') && typeof orgSlug === 'string'
+      ? await db.user.findFirst({ where: { ...where, organization: { slug: orgSlug } }, include: { organization: true } })
+      : undefined;
     const valid = user?.passwordHash && await verify(user.passwordHash, input.password);
     if (!valid || !user) {
-      if (organization) await audit(db, { organizationId: organization.id, action: 'LOGIN_FAILED', entityType: 'User', entityId: user?.id ?? 'unknown', ipAddress: request.ip });
+      if (user) await audit(db, { organizationId: user.organizationId, action: 'LOGIN_FAILED', entityType: 'User', entityId: user.id, ipAddress: request.ip });
       throw new HttpError(401, 'INVALID_CREDENTIALS', 'Invalid username/email or password');
     }
     await db.$transaction(async (tx) => {
@@ -68,48 +85,11 @@ export async function buildApp(config: Config, db: Db, otp: OtpProvider = create
       await audit(tx, { organizationId: user.organizationId, actorUserId: user.id, action: 'OWNER_LOGIN', entityType: 'User', entityId: user.id, ipAddress: request.ip });
     });
     await startSession(db, reply, config, user);
-    return { user: { id: user.id, role: user.role, name: user.name, organizationId: user.organizationId, branchId: user.branchId }, organization: { id: organization.id, name: organization.name } };
+    return { user: { id: user.id, role: user.role, name: user.name, organizationId: user.organizationId, branchId: user.branchId }, organization: { id: user.organization.id, name: user.organization.name } };
   });
 
-  app.post('/api/auth/employee/request-otp', { config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (request) => {
-    const input = otpRequestSchema.parse(request.body);
-    const orgSlug = z.string().min(2).max(100).parse(request.headers['x-organization-slug']);
-    const org = await db.organization.findUnique({ where: { slug: orgSlug } });
-    const employee = org && await db.employeeProfile.findUnique({ where: { organizationId_mobile: { organizationId: org.id, mobile: input.mobile } }, include: { user: true } });
-    if (!org || !employee?.user.active) throw new HttpError(404, 'EMPLOYEE_NOT_FOUND', 'No active employee account for this mobile number');
-    const recent = await db.otpChallenge.findFirst({ where: { userId: employee.userId, createdAt: { gt: new Date(Date.now() - 60_000) } } });
-    if (recent) throw new HttpError(429, 'OTP_RATE_LIMIT', 'Wait a minute before requesting another code');
-    const code = config.devOtp ? config.DEV_OTP_CODE : String(randomInt(100000, 1000000));
-    await otp.send(input.mobile, code);
-    await db.$transaction(async (tx) => {
-      await tx.otpChallenge.updateMany({ where: { userId: employee.userId, consumedAt: null }, data: { consumedAt: new Date() } });
-      await tx.otpChallenge.create({ data: { organizationId: employee.organizationId, userId: employee.userId, codeHash: await hash(code), expiresAt: new Date(Date.now() + 5 * 60_000) } });
-      await audit(tx, { organizationId: employee.organizationId, actorUserId: employee.userId, action: 'OTP_REQUESTED', entityType: 'User', entityId: employee.userId, ipAddress: request.ip });
-    });
-    return { status: 'sent' };
-  });
-
-  app.post('/api/auth/employee/verify-otp', { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (request, reply) => {
-    const input = otpVerifySchema.parse(request.body);
-    const orgSlug = z.string().min(2).max(100).parse(request.headers['x-organization-slug']);
-    const org = await db.organization.findUnique({ where: { slug: orgSlug } });
-    const employee = org && await db.employeeProfile.findUnique({ where: { organizationId_mobile: { organizationId: org.id, mobile: input.mobile } }, include: { user: true } });
-    if (!org || !employee?.user.active) throw new HttpError(401, 'INVALID_OTP', 'Invalid or expired code');
-    const challenge = await db.otpChallenge.findFirst({ where: { userId: employee.userId, consumedAt: null }, orderBy: { createdAt: 'desc' } });
-    if (!challenge || challenge.expiresAt <= new Date() || challenge.attempts >= 5) throw new HttpError(401, 'INVALID_OTP', 'Invalid or expired code');
-    const valid = await verify(challenge.codeHash, input.code);
-    if (!valid) {
-      await db.otpChallenge.update({ where: { id: challenge.id }, data: { attempts: { increment: 1 } } });
-      throw new HttpError(401, 'INVALID_OTP', 'Invalid or expired code');
-    }
-    await db.$transaction(async (tx) => {
-      await tx.otpChallenge.update({ where: { id: challenge.id }, data: { consumedAt: new Date() } });
-      await tx.user.update({ where: { id: employee.userId }, data: { lastLoginAt: new Date() } });
-      await audit(tx, { organizationId: employee.organizationId, actorUserId: employee.userId, action: 'EMPLOYEE_LOGIN', entityType: 'User', entityId: employee.userId, ipAddress: request.ip });
-    });
-    await startSession(db, reply, config, employee.user);
-    return { user: { id: employee.user.id, role: 'EMPLOYEE', name: employee.user.name, organizationId: employee.organizationId, branchId: employee.user.branchId }, organization: { id: org.id, name: org.name } };
-  });
+  registerEmployeeOtpRoutes(app, config, db, otp);
+  registerOwnerAccountRoutes(app, db);
 
   app.get('/api/auth/me', async (request) => {
     const user = await currentUser(db, request);
@@ -172,9 +152,11 @@ export async function buildApp(config: Config, db: Db, otp: OtpProvider = create
   });
 
   registerCatalogRoutes(app, db);
-  registerOperationsRoutes(app, db, messaging);
+  registerOperationsRoutes(app, db, messaging, config);
+  registerWhatsAppSettingsRoutes(app, db, config);
   registerMediaRoutes(app, db, storage);
   registerDailySummaryRoutes(app, db);
+  registerBillingRoutes(app, db, config, paymentProvider);
 
   return app;
 }

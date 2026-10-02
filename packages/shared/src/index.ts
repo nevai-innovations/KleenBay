@@ -20,10 +20,19 @@ export function canMoveStage(from: Stage, to: Stage): boolean {
 
 export function normalizeIndianMobile(input: string): string {
   const digits = input.replace(/\D/g, '');
-  const local = digits.startsWith('91') && digits.length === 12 ? digits.slice(2) : digits;
+  const withoutTrunk = digits.startsWith('0') && (digits.length === 11 || digits.length === 13) ? digits.slice(1) : digits;
+  const local = withoutTrunk.startsWith('91') && withoutTrunk.length === 12 ? withoutTrunk.slice(2) : withoutTrunk;
   if (!/^[6-9]\d{9}$/.test(local)) throw new Error('Enter a valid Indian mobile number');
   return `+91${local}`;
 }
+
+const indianMobileSchema = z.string().transform((value, context) => {
+  try { return normalizeIndianMobile(value); }
+  catch {
+    context.addIssue({ code: 'custom', message: 'Enter a valid Indian mobile number' });
+    return z.NEVER;
+  }
+});
 
 export function normalizeRegistration(input: string): string {
   const value = input.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -38,21 +47,29 @@ export const ownerLoginSchema = z.object({
   password: z.string().min(1).max(1024),
 });
 
+export const ownerSetupSchema = z.object({
+  token: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  password: z.string().min(14).max(128),
+});
+
 export const employeeSchema = z.object({
   name: z.string().trim().min(2).max(120),
-  mobile: z.string().transform(normalizeIndianMobile),
+  mobile: indianMobileSchema,
   branchId: z.string().optional(),
   active: z.boolean().default(true),
 });
 
 export const employeeUpdateSchema = employeeSchema.partial();
-export const otpRequestSchema = z.object({ mobile: z.string().transform(normalizeIndianMobile) });
-export const otpVerifySchema = otpRequestSchema.extend({ code: z.string().regex(/^\d{6}$/) });
+export const otpRequestSchema = z.object({ mobile: indianMobileSchema });
+export const otpVerifySchema = z.union([
+  otpRequestSchema.extend({ code: z.string().regex(/^\d{6}$/) }),
+  otpRequestSchema.extend({ accessToken: z.string().min(32).max(8192).regex(/^\S+$/) }),
+]);
 
 export const vehicleTypes = ['HATCHBACK', 'SEDAN', 'SUV', 'MUV', 'TWO_WHEELER', 'COMMERCIAL', 'OTHER'] as const;
 export type VehicleType = (typeof vehicleTypes)[number];
 
-const mobileSchema = z.string().transform(normalizeIndianMobile);
+const mobileSchema = indianMobileSchema;
 export const customerSchema = z.object({
   name: z.string().trim().min(2).max(120),
   mobile: mobileSchema,

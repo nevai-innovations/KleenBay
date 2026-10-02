@@ -7,6 +7,10 @@ data:
   NODE_ENV: production
   STAGING_MODE: "true"
   DEV_OTP_ENABLED: "false"
+  OTP_PROVIDER: DUMMY_OTP
+  DUMMY_OTP: "123456"
+  MESSAGING_PROVIDER: mock
+  MOCK_MESSAGING_FAIL: "false"
   APP_ORIGIN: https://stage.kleenbay.com
   COOKIE_SECURE: "true"
   HOST: 0.0.0.0

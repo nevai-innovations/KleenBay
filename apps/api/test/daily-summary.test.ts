@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { hash } from '@node-rs/argon2';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app.js';
@@ -9,8 +9,10 @@ import { todayWindow } from '../src/daily-summary.js';
 
 const testUrl = assertLocalTestDatabase(process.env.TEST_DATABASE_URL);
 const db = createDb(testUrl);
-const config = { ...getConfig(), NODE_ENV: 'test' as const, devOtp: true, DEV_OTP_ENABLED: 'true' as const, LOG_LEVEL: 'silent' };
+const config = { ...getConfig(), NODE_ENV: 'test' as const, devOtp: true, DEV_OTP_ENABLED: 'true' as const, DEV_OTP_FIXED_CODE: '123456', LOG_LEVEL: 'silent' };
 const slug = `summary-${randomUUID()}`;
+const employeeMobile = String(9000000000 + randomInt(900000000));
+const employeeE164 = `+91${employeeMobile}`;
 const now = new Date('2026-10-01T10:00:00.000Z');
 const at = (hour: number, dayOffset = 0) => new Date(Date.parse('2026-10-01T00:00:00+05:30') + (hour + dayOffset * 24) * 60 * 60_000);
 let app: Awaited<ReturnType<typeof buildApp>>;
@@ -31,7 +33,7 @@ beforeAll(async () => {
   mainBranchId = (await db.branch.create({ data: { organizationId: org.id, name: 'Main' } })).id;
   otherBranchId = (await db.branch.create({ data: { organizationId: org.id, name: 'Second' } })).id;
   const owner = await db.user.create({ data: { organizationId: org.id, branchId: mainBranchId, role: 'OWNER', name: 'Owner', username: 'owner', passwordHash: await hash('test-password') } });
-  const employee = await db.user.create({ data: { organizationId: org.id, branchId: mainBranchId, role: 'EMPLOYEE', name: 'Ravi', employee: { create: { mobile: '+919876543210' } } } });
+  const employee = await db.user.create({ data: { organizationId: org.id, branchId: mainBranchId, role: 'EMPLOYEE', name: 'Ravi', employee: { create: { mobile: employeeE164 } } } });
   const service = await db.service.create({ data: { organizationId: org.id, name: 'Basic Wash', category: 'Wash', basePricePaise: 29900, estimatedMinutes: 45 } });
 
   async function customerVehicle(name: string, mobile: string, registrationNumber: string) {
@@ -73,8 +75,8 @@ beforeAll(async () => {
   await app.ready();
   const ownerLogin = await app.inject({ method: 'POST', url: '/api/auth/owner/login', headers: { origin: config.APP_ORIGIN, 'x-organization-slug': slug }, payload: { login: 'owner', password: 'test-password' } });
   ownerCookie = `${ownerLogin.cookies[0]!.name}=${ownerLogin.cookies[0]!.value}`;
-  await app.inject({ method: 'POST', url: '/api/auth/employee/request-otp', headers: { origin: config.APP_ORIGIN, 'x-organization-slug': slug }, payload: { mobile: '9876543210' } });
-  const employeeLogin = await app.inject({ method: 'POST', url: '/api/auth/employee/verify-otp', headers: { origin: config.APP_ORIGIN, 'x-organization-slug': slug }, payload: { mobile: '9876543210', code: config.DEV_OTP_CODE } });
+  await app.inject({ method: 'POST', url: '/api/auth/employee/request-otp', headers: { origin: config.APP_ORIGIN, 'x-organization-slug': slug }, payload: { mobile: employeeMobile } });
+  const employeeLogin = await app.inject({ method: 'POST', url: '/api/auth/employee/verify-otp', headers: { origin: config.APP_ORIGIN, 'x-organization-slug': slug }, payload: { mobile: employeeMobile, code: config.DEV_OTP_FIXED_CODE } });
   employeeCookie = `${employeeLogin.cookies[0]!.name}=${employeeLogin.cookies[0]!.value}`;
 });
 

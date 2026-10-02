@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { vehicleTypes } from '@carwash/shared';
-import { api, patch, post, type Branch, type Customer, type Service } from './api';
+import { api, patch, post, type Branch, type Customer, type Job, type Service, type Vehicle } from './api';
 
 const money = (paise: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(paise / 100);
 const typeName = (type: string) => type.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (character) => character.toUpperCase());
@@ -54,6 +54,37 @@ export function CustomersView() {
     {selected && <section className="panel customer-detail"><div className="detail-head"><div><h3>{selected.name}</h3><p>{selected.mobile}</p></div><span className="count-chip dark">{selected.vehicles.length} vehicle{selected.vehicles.length === 1 ? '' : 's'}</span></div>
       <div className="vehicle-list">{selected.vehicles.length ? selected.vehicles.map((vehicle) => <div className="vehicle-row" key={vehicle.id}><strong>{vehicle.registrationNumber}</strong><span>{vehicle.make} {vehicle.model}</span><small>{typeName(vehicle.type)}</small></div>) : <p className="catalog-empty">No vehicles recorded yet.</p>}</div>
       <form className="vehicle-form" onSubmit={createVehicle}><h4>Add Vehicle</h4><label className="field"><span>Registration number</span><input className="input" value={plate} onChange={(event) => setPlate(event.target.value)} required placeholder="KL07AB1234" /></label><label className="field"><span>Make</span><input className="input" value={make} onChange={(event) => setMake(event.target.value)} required /></label><label className="field"><span>Model</span><input className="input" value={model} onChange={(event) => setModel(event.target.value)} required /></label><label className="field"><span>Type</span><select className="input" value={vehicleType} onChange={(event) => setVehicleType(event.target.value as (typeof vehicleTypes)[number])}>{vehicleTypes.map((type) => <option key={type} value={type}>{typeName(type)}</option>)}</select></label><button className="btn primary" disabled={busy}>Add vehicle</button></form></section>}
+    {error && <div className="portal-error" role="alert">{error}</div>}
+  </div>;
+}
+
+export function VehiclesView() {
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [selected, setSelected] = useState<Vehicle | null>(null);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [query, setQuery] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void api<Vehicle[]>(`/vehicles?q=${encodeURIComponent(query)}`).then(setVehicles).catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not load vehicles'));
+    }, query ? 200 : 0);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  async function openVehicle(vehicle: Vehicle) {
+    setSelected(vehicle); setError('');
+    try {
+      const id = encodeURIComponent(vehicle.id);
+      const [active, history] = await Promise.all([api<Job[]>(`/jobs?view=active&vehicleId=${id}`), api<Job[]>(`/jobs?view=history&vehicleId=${id}`)]);
+      setJobs([...active, ...history]);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load vehicle history'); }
+  }
+
+  return <div className="catalog-view"><div className="section-head"><div><h2>Vehicles</h2></div><span className="count-chip">{vehicles.length} shown</span></div>
+    <div className="catalog-grid"><section className="panel catalog-list"><label className="field"><span>Search vehicles</span><input className="input" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Registration, customer or mobile" /></label>
+      <div className="catalog-rows">{vehicles.length ? vehicles.map((vehicle) => <button type="button" key={vehicle.id} className={`catalog-row${selected?.id === vehicle.id ? ' selected' : ''}`} onClick={() => void openVehicle(vehicle)}><span className="who-dot">{vehicle.registrationNumber.slice(0, 1)}</span><span><strong>{vehicle.registrationNumber}</strong><small>{vehicle.make} {vehicle.model} · {vehicle.customer?.name}</small></span></button>) : <p className="catalog-empty">No vehicles found.</p>}</div></section>
+      <section className="panel customer-detail"><h3>{selected ? selected.registrationNumber : 'Vehicle history'}</h3>{selected ? <><p>{selected.make} {selected.model} · {selected.customer?.name} · {selected.customer?.mobile}</p><div className="vehicle-list">{jobs.length ? jobs.map((job) => <div className="vehicle-row" key={job.id}><strong>{job.serviceName}</strong><span>{job.status.replaceAll('_', ' ')}</span><small>{new Date(job.checkedInAt).toLocaleDateString('en-IN')}</small></div>) : <p className="catalog-empty">No visits recorded yet.</p>}</div></> : <p className="catalog-empty">Select a vehicle to see its visits.</p>}</section></div>
     {error && <div className="portal-error" role="alert">{error}</div>}
   </div>;
 }

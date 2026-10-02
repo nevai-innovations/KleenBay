@@ -1,0 +1,28 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: kleenbay-stage-split-owners-
+  namespace: kleenbay-stage
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: split
+          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-api@sha256:2fbacd1627c6994d49df352b5569dd46b62217e0dde297aa51e57dd8aec688ff
+          command: [node, apps/api/dist/scripts/split-stage-owners.js]
+          envFrom:
+            - configMapRef:
+                name: kleenbay-stage-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: kleenbay-stage-migrator-db
+                  key: DATABASE_URL

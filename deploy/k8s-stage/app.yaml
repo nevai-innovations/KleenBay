@@ -34,7 +34,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: api
-          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-api@sha256:91d055725caf64a98494a06ba2114244522c1509ca8ce38c4a1f1f1be2a4608c
+          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-api@sha256:bd0333dd3d12c1720090695d1a900c2ac758a661a7f156e1733f4673b8913543
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
@@ -43,6 +43,15 @@ spec:
             - configMapRef:
                 name: kleenbay-stage-config
           env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: OTP_HASH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: kleenbay-stage-otp
+                  key: OTP_HASH_SECRET
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -93,7 +102,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: web
-          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-web@sha256:77769e0300df63766b801abbd1ce38da696c47ac05d4826addc3e59cf97c113e
+          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-web@sha256:5ced169d80e1072b31cdc83d8a5f62a27eca5db89e3d06f7df44eb58ae3154d0
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80

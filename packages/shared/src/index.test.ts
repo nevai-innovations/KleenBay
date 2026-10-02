@@ -5,6 +5,8 @@ describe('shared business rules', () => {
   it('normalizes Indian mobiles and rejects invalid numbers', () => {
     expect(normalizeIndianMobile('98765 43210')).toBe('+919876543210');
     expect(normalizeIndianMobile('+91 98765 43210')).toBe('+919876543210');
+    expect(normalizeIndianMobile('0919876543210')).toBe('+919876543210');
+    expect(normalizeIndianMobile('09876543210')).toBe('+919876543210');
     expect(() => normalizeIndianMobile('12345')).toThrow();
   });
 

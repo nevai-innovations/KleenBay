@@ -43,12 +43,40 @@ enum MessageStatus {
   FAILED
 }
 
+enum MessageProviderType {
+  MOCK
+  MSG91
+}
+
+enum WhatsAppConnectionStatus {
+  MOCK_ACTIVE
+  NOT_CONNECTED
+  PENDING_VERIFICATION
+  CONNECTED
+  ERROR
+}
+
 enum PaymentMethod {
   CASH
   UPI
   CARD
   BANK_TRANSFER
   OTHER
+}
+
+enum SubscriptionStatus {
+  INACTIVE
+  PAYMENT_PENDING
+  ACTIVE
+  EXPIRED
+  PAYMENT_FAILED
+}
+
+enum SubscriptionPaymentStatus {
+  INITIATED
+  SUCCESS
+  FAILED
+  CANCELLED
 }
 
 enum InvoiceStatus {
@@ -103,6 +131,7 @@ model Organization {
   users         User[]
   sessions      Session[]
   otpChallenges OtpChallenge[]
+  ownerSetups   OwnerSetup[]
   auditLogs     AuditLog[]
   customers     Customer[]
   vehicles      Vehicle[]
@@ -113,11 +142,58 @@ model Organization {
   jobStageHistory JobStageHistory[]
   jobAssignments JobAssignment[]
   messages      Message[]
+  messageAttempts MessageAttempt[]
+  whatsAppConfig OrganizationWhatsAppConfig?
   invoices      Invoice[]
   payments      Payment[]
   inspections   VehicleInspection[]
   damageItems   InspectionDamageItem[]
   photos        Photo[]
+  subscription  Subscription?
+  subscriptionPayments SubscriptionPayment[]
+}
+
+model Subscription {
+  id                 String             @id @default(cuid())
+  organizationId     String             @unique
+  planCode           String             @default("KLEENBAY_ANNUAL")
+  status             SubscriptionStatus @default(INACTIVE)
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  activatedAt        DateTime?
+  cancelledAt        DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  organization       Organization       @relation(fields: [organizationId], references: [id])
+  payments           SubscriptionPayment[]
+
+  @@unique([id, organizationId])
+  @@index([organizationId, status])
+}
+
+model SubscriptionPayment {
+  id                    String                    @id @default(cuid())
+  organizationId        String
+  subscriptionId        String
+  provider              String                    @default("PAYU")
+  merchantTransactionId String                    @unique
+  providerTransactionId String?                   @unique
+  amountPaise           Int
+  currency              String                    @default("INR")
+  status                SubscriptionPaymentStatus @default(INITIATED)
+  initiatedAt           DateTime                  @default(now())
+  completedAt           DateTime?
+  failureReason         String?
+  providerStatus        String?
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  organization          Organization              @relation(fields: [organizationId], references: [id])
+  subscription          Subscription              @relation(fields: [subscriptionId, organizationId], references: [id, organizationId])
+
+  @@unique([id, organizationId])
+  @@index([organizationId, initiatedAt])
+  @@index([organizationId, status])
+  @@index([subscriptionId, organizationId])
 }
 
 model Branch {
@@ -134,6 +210,7 @@ model Branch {
   servicePrices  ServicePrice[]
   serviceBranches ServiceBranch[]
   jobs           Job[]
+  messages       Message[]
 
   @@unique([organizationId, name])
   @@unique([id, organizationId])
@@ -147,7 +224,7 @@ model User {
   role           Role
   name           String
   username       String?
-  email          String?
+  email          String?          @unique
   passwordHash   String?
   active         Boolean          @default(true)
   lastLoginAt    DateTime?
@@ -158,6 +235,7 @@ model User {
   employee       EmployeeProfile?
   sessions       Session[]
   otpChallenges  OtpChallenge[]
+  ownerSetup     OwnerSetup?
   auditLogs      AuditLog[]
   checkedInJobs  Job[]             @relation("CheckedInBy")
   handedOverJobs Job[]             @relation("HandedOverBy")
@@ -171,13 +249,14 @@ model User {
   @@unique([id, organizationId])
   @@unique([organizationId, username])
   @@unique([organizationId, email])
+  // The one-OWNER-per-organization partial unique index is maintained by migration.
   @@index([organizationId, role, active])
 }
 
 model EmployeeProfile {
   userId         String   @id
   organizationId String
-  mobile         String
+  mobile         String   @unique
   createdAt      DateTime @default(now())
   user           User     @relation(fields: [userId, organizationId], references: [id, organizationId])
 
@@ -205,6 +284,9 @@ model OtpChallenge {
   organizationId String
   userId         String
   codeHash       String
+  requestSourceHash String?
+  providerTokenHash String? @unique
+  maxAttempts    Int          @default(5)
   expiresAt      DateTime
   attempts       Int          @default(0)
   consumedAt     DateTime?
@@ -213,6 +295,22 @@ model OtpChallenge {
   user           User         @relation(fields: [userId, organizationId], references: [id, organizationId])
 
   @@index([organizationId, userId, createdAt])
+  @@index([requestSourceHash, createdAt])
+}
+
+model OwnerSetup {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String       @unique
+  tokenHash      String       @unique
+  expiresAt      DateTime
+  consumedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  user           User         @relation(fields: [userId, organizationId], references: [id, organizationId])
+
+  @@unique([userId, organizationId])
+  @@index([organizationId, expiresAt])
 }
 
 model AuditLog {
@@ -247,6 +345,7 @@ model Customer {
   organization    Organization @relation(fields: [organizationId], references: [id])
   vehicles        Vehicle[]
   jobs            Job[]
+  messages        Message[]
 
   @@unique([id, organizationId])
   @@unique([organizationId, mobile])
@@ -356,6 +455,8 @@ model Job {
   handedOverAt   DateTime?
   handedOverById String?
   handoverNotes  String?
+  trackingTokenHash String? @unique
+  trackingTokenCiphertext String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id])
@@ -419,23 +520,72 @@ model JobAssignment {
 model Message {
   id                String        @id @default(cuid())
   organizationId    String
+  branchId          String
   jobId             String
+  customerId        String
   event             MessageEvent
+  templateKey       String
   recipient         String
   renderedText      String
+  provider          MessageProviderType
+  senderNumber      String?
+  senderDisplayName String?
+  trackingTokenHash String?
   status            MessageStatus @default(PENDING)
   attempts          Int           @default(0)
   providerMessageId String?
   sentAt            DateTime?
   failedAt          DateTime?
   failureReason     String?
+  nextRetryAt       DateTime?
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
   organization      Organization  @relation(fields: [organizationId], references: [id])
+  branch            Branch        @relation(fields: [branchId, organizationId], references: [id, organizationId])
   job               Job           @relation(fields: [jobId, organizationId], references: [id, organizationId])
+  customer          Customer      @relation(fields: [customerId, organizationId], references: [id, organizationId])
+  deliveryAttempts  MessageAttempt[]
 
   @@unique([jobId, event])
+  @@unique([id, organizationId])
   @@index([organizationId, status, createdAt])
+  @@index([organizationId, branchId, createdAt])
+}
+
+model OrganizationWhatsAppConfig {
+  organizationId String @id
+  provider MessageProviderType @default(MOCK)
+  enabled Boolean @default(true)
+  senderNumber String?
+  senderDisplayName String?
+  msg91IntegratedNumberId String?
+  credentialRef String?
+  templateReceived String @default("VEHICLE_RECEIVED")
+  templateWashing String @default("WASH_STARTED")
+  templateReady String @default("VEHICLE_READY")
+  templateHandedOver String? @default("VEHICLE_HANDED_OVER")
+  status WhatsAppConnectionStatus @default(MOCK_ACTIVE)
+  mockFailNext Boolean @default(false)
+  lastVerifiedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id])
+}
+
+model MessageAttempt {
+  id             String       @id @default(cuid())
+  organizationId String
+  messageId      String
+  number         Int
+  status         MessageStatus
+  failureReason  String?
+  providerMessageId String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  message        Message      @relation(fields: [messageId, organizationId], references: [id, organizationId])
+
+  @@unique([messageId, number])
+  @@index([organizationId, messageId, createdAt])
 }
 
 model Invoice {

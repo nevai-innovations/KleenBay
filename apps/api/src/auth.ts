@@ -22,7 +22,7 @@ export async function currentUser(db: Db, request: FastifyRequest) {
   const token = request.cookies[cookieName];
   if (!token) throw new HttpError(401, 'UNAUTHENTICATED', 'Sign in required');
   const session = await db.session.findUnique({ where: { tokenHash: digest(token) }, include: { user: true } });
-  if (!session || session.revokedAt || session.expiresAt <= new Date() || !session.user.active) {
+  if (!session || session.revokedAt || session.expiresAt <= new Date() || !session.user.active || session.organizationId !== session.user.organizationId) {
     throw new HttpError(401, 'UNAUTHENTICATED', 'Session expired');
   }
   return session.user;

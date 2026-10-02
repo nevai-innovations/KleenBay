@@ -7,7 +7,9 @@ import { audit } from './audit.js';
 import { currentUser, requireOwner } from './auth.js';
 import { resolveServicePrice } from './catalog.js';
 import { badRequest, forbidden, HttpError, notFound } from './errors.js';
-import { dispatchMessage, type MessagingProvider } from './messaging.js';
+import { dispatchMessage, messageRecipient, renderCustomerMessage, type MessagingProvider } from './messaging.js';
+import { createTrackingToken, readTrackingToken, trackingHash, trackingUrl } from './tracking.js';
+import type { Config } from './config.js';
 
 const idParams = z.object({ id: z.string().min(1) });
 const listQuery = z.object({
@@ -35,7 +37,7 @@ async function getJob(db: Db, user: User, id: string) {
       handedOverBy: { select: { id: true, name: true } },
       stages: { include: { actor: { select: { id: true, name: true } } }, orderBy: { createdAt: 'asc' } },
       assignments: { include: { employee: { select: { id: true, name: true } } }, orderBy: { assignedAt: 'asc' } },
-      messages: { orderBy: { createdAt: 'asc' } },
+      messages: { include: { deliveryAttempts: { orderBy: { number: 'asc' } } }, orderBy: { createdAt: 'asc' } },
       invoice: { include: { payments: { include: { collectedBy: { select: { id: true, name: true } } }, orderBy: { createdAt: 'asc' } } } },
       inspection: { include: { recordedBy: { select: { id: true, name: true } }, damages: true } },
       photos: { select: { id: true, kind: true, description: true, damageItemId: true, createdAt: true, uploadedBy: { select: { id: true, name: true } } }, orderBy: { createdAt: 'asc' } },
@@ -71,28 +73,40 @@ async function getJob(db: Db, user: User, id: string) {
     };
   }
   const paidPaise = job.invoice?.payments.reduce((sum, payment) => sum + payment.amountPaise, 0) ?? 0;
-  return { ...job, paidPaise, outstandingPaise: Math.max(0, job.totalPaise - paidPaise), paymentStatus: paidPaise === 0 ? 'UNPAID' : paidPaise < job.totalPaise ? 'PARTIALLY_PAID' : 'PAID' };
+  const { trackingTokenHash: _hash, trackingTokenCiphertext: _ciphertext, ...publicJob } = job;
+  return { ...publicJob, paidPaise, outstandingPaise: Math.max(0, job.totalPaise - paidPaise), paymentStatus: paidPaise === 0 ? 'UNPAID' : paidPaise < job.totalPaise ? 'PARTIALLY_PAID' : 'PAID' };
 }
 
-function renderMessage(event: MessageEvent, customerName: string, vehicleNumber: string, businessName: string) {
-  switch (event) {
-    case 'VEHICLE_RECEIVED': return `Hi ${customerName}, your vehicle ${vehicleNumber} has been received at ${businessName}. We will keep you updated on the wash progress.`;
-    case 'WASH_STARTED': return `Hi ${customerName}, washing has started for your vehicle ${vehicleNumber} at ${businessName}.`;
-    case 'VEHICLE_READY': return `Hi ${customerName}, your vehicle ${vehicleNumber} is ready for pickup at ${businessName}. Thank you.`;
-    case 'VEHICLE_HANDED_OVER': return `Thank you for visiting ${businessName}. Your vehicle ${vehicleNumber} has been handed over successfully.`;
+async function queueMessage(tx: Prisma.TransactionClient, job: { id: string; organizationId: string; branchId: string; customerId: string; trackingTokenHash: string | null; trackingTokenCiphertext: string | null }, event: MessageEvent, customer: { name: string; mobile: string }, vehicleNumber: string, businessName: string, config: Config) {
+  const settings = await tx.organizationWhatsAppConfig.findUnique({ where: { organizationId: job.organizationId } });
+  if (settings?.enabled === false) return null;
+  const templateKey = { VEHICLE_RECEIVED: settings?.templateReceived ?? 'VEHICLE_RECEIVED', WASH_STARTED: settings?.templateWashing ?? 'WASH_STARTED', VEHICLE_READY: settings?.templateReady ?? 'VEHICLE_READY', VEHICLE_HANDED_OVER: settings ? settings.templateHandedOver : 'VEHICLE_HANDED_OVER' }[event];
+  if (!templateKey) return null;
+  let tokenHash = job.trackingTokenHash;
+  let ciphertext = job.trackingTokenCiphertext;
+  if (!tokenHash || !ciphertext) {
+    const generated = createTrackingToken(config.trackingSecret);
+    tokenHash = generated.hash;
+    ciphertext = generated.ciphertext;
+    await tx.job.update({ where: { id: job.id }, data: { trackingTokenHash: tokenHash, trackingTokenCiphertext: ciphertext } });
   }
-}
-
-async function queueMessage(tx: Prisma.TransactionClient, job: { id: string; organizationId: string }, event: MessageEvent, customer: { name: string; mobile: string }, vehicleNumber: string, businessName: string) {
+  const url = trackingUrl(config.APP_ORIGIN, readTrackingToken(config.trackingSecret, ciphertext));
   const message = await tx.message.upsert({
     where: { jobId_event: { jobId: job.id, event } },
     update: {},
-    create: { organizationId: job.organizationId, jobId: job.id, event, recipient: customer.mobile, renderedText: renderMessage(event, customer.name, vehicleNumber, businessName) },
+    create: { organizationId: job.organizationId, branchId: job.branchId, jobId: job.id, customerId: job.customerId, event, templateKey, recipient: messageRecipient(customer.mobile), renderedText: renderCustomerMessage(event, customer.name, vehicleNumber, businessName, url), provider: settings?.provider ?? 'MOCK', senderNumber: settings?.senderNumber ?? null, senderDisplayName: settings?.senderDisplayName ?? null, trackingTokenHash: tokenHash },
   });
   return message.status === 'PENDING' && message.attempts === 0 ? message.id : null;
 }
 
-export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging: MessagingProvider) {
+export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging: MessagingProvider, config: Config) {
+  app.get('/api/public/track/:token', async (request) => {
+    const { token } = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }).parse(request.params);
+    const job = await db.job.findUnique({ where: { trackingTokenHash: trackingHash(token) }, select: { status: true, serviceName: true, expectedAt: true, handedOverAt: true, organization: { select: { name: true } }, vehicle: { select: { registrationNumber: true } } } });
+    if (!job) notFound();
+    return { businessName: job.organization.name, vehicleNumber: job.vehicle.registrationNumber, serviceName: job.serviceName, status: job.status, expectedAt: job.expectedAt, handedOverAt: job.handedOverAt };
+  });
+
   const dispatch = (id: string | null) => {
     if (id) setImmediate(() => { void dispatchMessage(db, messaging, id).catch((error: unknown) => app.log.error({ err: error, messageId: id }, 'Message dispatch failed')); });
   };
@@ -158,7 +172,7 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
       ] } : {}),
     };
     const jobs = await db.job.findMany({ where, include: { branch: { select: { id: true, name: true } }, customer: { select: { id: true, name: true, mobile: true } }, vehicle: { select: { id: true, registrationNumber: true, make: true, model: true } } }, orderBy: { checkedInAt: 'desc' }, take: 150 });
-    if (user.role === 'OWNER') return jobs;
+    if (user.role === 'OWNER') return jobs.map(({ trackingTokenHash: _hash, trackingTokenCiphertext: _ciphertext, ...job }) => job);
     return jobs.map((job) => ({
       id: job.id,
       number: job.number,
@@ -229,7 +243,7 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
         await audit(tx, { organizationId: user.organizationId, actorUserId: user.id, action: 'JOB_ASSIGNED', entityType: 'JobAssignment', entityId: assignment.id, after: { jobId: job.id, employeeId }, ipAddress: request.ip });
       }
       await audit(tx, { organizationId: user.organizationId, actorUserId: user.id, action: 'JOB_CHECKED_IN', entityType: 'Job', entityId: job.id, after: { number: job.number, vehicleId: vehicle.id, status: 'RECEIVED', totalPaise: job.totalPaise, branchId }, ipAddress: request.ip });
-      const messageId = input.notify ? await queueMessage(tx, job, 'VEHICLE_RECEIVED', customer, vehicle.registrationNumber, org.name) : null;
+      const messageId = input.notify ? await queueMessage(tx, job, 'VEHICLE_RECEIVED', customer, vehicle.registrationNumber, org.name, config) : null;
       return { jobId: job.id, messageId };
     });
     dispatch(result.messageId);
@@ -255,7 +269,7 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
       if (!updated.count) throw new HttpError(409, 'STAGE_CHANGED', 'Vehicle status changed. Refresh the board.');
       await tx.jobStageHistory.create({ data: { organizationId: user.organizationId, jobId: id, fromStage: current.status, toStage: to, actorUserId: user.id } });
       await audit(tx, { organizationId: user.organizationId, actorUserId: user.id, action: 'JOB_STAGE_CHANGED', entityType: 'Job', entityId: id, before: { status: current.status }, after: { status: to }, ipAddress: request.ip });
-      return current.notify ? queueMessage(tx, current, to === 'WASHING' ? 'WASH_STARTED' : 'VEHICLE_READY', current.customer, current.vehicle.registrationNumber, current.organization.name) : null;
+      return current.notify ? queueMessage(tx, current, to === 'WASHING' ? 'WASH_STARTED' : 'VEHICLE_READY', current.customer, current.vehicle.registrationNumber, current.organization.name, config) : null;
     });
     dispatch(messageId);
     return getJob(db, user, id);
@@ -304,7 +318,7 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
       }
       await tx.jobStageHistory.create({ data: { organizationId: user.organizationId, jobId: id, fromStage: 'READY', toStage: 'HANDED_OVER', actorUserId: user.id, note: input.notes } });
       await audit(tx, { organizationId: user.organizationId, actorUserId: user.id, action: 'VEHICLE_HANDED_OVER', entityType: 'Job', entityId: id, before: { status: 'READY' }, after: { status: 'HANDED_OVER', paymentAmountPaise: input.paymentAmountPaise }, ipAddress: request.ip });
-      return job.notify && job.organization.sendHandoverMessage ? queueMessage(tx, job, 'VEHICLE_HANDED_OVER', job.customer, job.vehicle.registrationNumber, job.organization.name) : null;
+      return job.notify && job.organization.sendHandoverMessage ? queueMessage(tx, job, 'VEHICLE_HANDED_OVER', job.customer, job.vehicle.registrationNumber, job.organization.name, config) : null;
     });
     dispatch(messageId);
     return getJob(db, user, id);
@@ -337,7 +351,8 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
     if (!message) notFound();
     if (message.status !== 'FAILED') throw new HttpError(409, 'MESSAGE_NOT_FAILED', 'Only failed messages can be retried');
     await db.$transaction(async (tx) => {
-      await tx.message.update({ where: { id: messageId }, data: { status: 'PENDING', failedAt: null, failureReason: null } });
+      const updated = await tx.message.updateMany({ where: { id: messageId, jobId: id, organizationId: owner.organizationId, status: 'FAILED' }, data: { status: 'PENDING', nextRetryAt: null } });
+      if (!updated.count) throw new HttpError(409, 'MESSAGE_NOT_FAILED', 'Only failed messages can be retried');
       await audit(tx, { organizationId: owner.organizationId, actorUserId: owner.id, action: 'MESSAGE_RETRIED', entityType: 'Message', entityId: messageId, before: { status: 'FAILED' }, after: { status: 'PENDING' }, ipAddress: request.ip });
     });
     dispatch(messageId);
