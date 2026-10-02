@@ -9,7 +9,10 @@ import { audit } from './audit.js';
 import { HttpError, notFound } from './errors.js';
 import { ANNUAL_PLAN, type PaymentProvider, type PayUCallback } from './payu.js';
 
-const checkoutInput = z.object({ payerMobile: z.string().transform((value) => normalizeIndianMobile(value)) }).strict();
+const checkoutInput = z.object({ payerMobile: z.string().transform((value, context) => {
+  try { return normalizeIndianMobile(value); }
+  catch { context.addIssue({ code: 'custom', message: 'Enter a valid Indian mobile number' }); return z.NEVER; }
+}) }).strict();
 const transactionParams = z.object({ id: z.string().min(1) });
 
 function addYear(from: Date): Date {

@@ -213,3 +213,22 @@ Repeat the test-database migration block in step 3. A normal
 
 The old [prototype](prototype/) is retained for UX reference only. It uses
 browser sample data and is not a replacement for the API-driven app.
+
+### Annual subscription billing
+
+Billing is owner-only and belongs to the signed-in organization. The server sets
+the single KleenBay Annual plan at INR 7,200; PayU test checkout remains unavailable
+until `PAYU_MERCHANT_KEY`, `PAYU_MERCHANT_SALT`, and
+`PAYU_BASE_URL=https://test.payu.in` are configured in the untracked `.env` or
+stage secret. Never use live PayU credentials locally or in stage. Successful
+payments activate a subscription only after server-side PayU verification. Run
+`pnpm --filter @carwash/api db:deploy` for the subscription migrations.
+
+The linked policy pages are placeholders pending legal approval. Production
+checkout requires the final policies and `BILLING_POLICIES_APPROVED=true`; leave
+that flag false until the approved copy is published. PayU secrets must never go
+in Git, frontend environment variables, or docs.
+
+Run `pnpm verify` for lint, typecheck, tests and builds. Tests require the separate
+`carwash_test` database from `docker/postgres/init`; the suite accepts only a
+loopback `_test` database and clears its test tables.

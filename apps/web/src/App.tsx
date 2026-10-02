@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowLeft, CarFront, ChartNoAxesColumn, Columns3, ContactRound, CreditCard, History, Pencil, Settings2, Sparkles, Users } from 'lucide-react';
 import { api, patch, post, type Branch, type Employee, type Session } from './api';
 import { CustomersView, ServicesView, VehiclesView } from './CatalogViews';
@@ -110,7 +110,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
 
   return <div className={`login-page${otpSent && mode === 'employee' ? ' is-verifying' : ''}`}>
     <div className="login-wrap">
-      <Brand subtitle="Car wash operations" />
+      <Brand  />
       <div className={`login-box${otpSent && mode === 'employee' ? ' is-verifying' : ''}`}>
         {otpSent && mode === 'employee' ? <div className="otp-view">
           <button type="button" className="otp-back" onClick={editMobile} aria-label="Back to mobile number" title="Back to mobile number"><ArrowLeft size={20} /></button>
@@ -200,6 +200,26 @@ function OwnerPortal({ session, onLogout }: { session: Session; onLogout: () => 
     { id: 'settings' as const, label: 'Settings', icon: Settings2 },
   ];
   const sectionTitle = navigation.find((item) => item.id === section)!.label;
+  let content: ReactNode;
+  switch (section) {
+    case 'board': content = <BoardView session={session} />; break;
+    case 'summary': content = <DailySummaryView />; break;
+    case 'history': content = <HistoryView session={session} />; break;
+    case 'customers': content = <CustomersView />; break;
+    case 'vehicles': content = <VehiclesView />; break;
+    case 'services': content = <ServicesView />; break;
+    case 'billing': content = <BillingView />; break;
+    case 'settings': content = <OwnerSettings />; break;
+    case 'employees': content = <>
+      <div className="section-head"><div><h2>Team</h2><p>Manage who can sign in and work on vehicles.</p></div><span className="count-chip">{employees.filter((employee) => employee.active).length} active</span></div>
+      <div className="team-layout"><section className="panel team-list" aria-label="Employees"><div className="team-list-head"><strong>Employees</strong><span>{employees.length}</span></div>
+        {employees.length === 0 ? <div className="team-empty">No employees yet.</div> : employees.map((employee) => <div className="team-row" key={employee.id}><span className="who-dot">{employee.name.slice(0, 1)}</span><div className="team-person"><strong>{employee.name}</strong><small>{employee.mobile}{employee.branchName ? ` · ${employee.branchName}` : ''}</small></div><span className={`status-pill ${employee.active ? 'is-active' : ''}`}>{employee.active ? 'Active' : 'Inactive'}</span><button className="btn small" onClick={() => void toggle(employee)}>{employee.active ? 'Deactivate' : 'Activate'}</button></div>)}</section>
+        <form className="panel add-form" onSubmit={addEmployee}><h3>Add Employee</h3><Field label="Employee name" value={name} onChange={(event) => setName(event.target.value)} required /><Field label="Mobile number" type="tel" inputMode="tel" value={mobile} onChange={(event) => setMobile(event.target.value)} required />
+          {branches.length > 1 && <label className="field"><span>Branch</span><select className="input" value={branchId} onChange={(event) => setBranchId(event.target.value)}><option value="">All branches</option>{branches.map((branch) => <option value={branch.id} key={branch.id}>{branch.name}</option>)}</select></label>}
+          <button className="btn primary block" disabled={busy}>Add employee</button></form></div>
+      {error && <div className="portal-error" role="alert">{error}</div>}
+    </>; break;
+  }
 
   return <div className="shell">
     <aside className="rail"><Brand />
@@ -208,14 +228,7 @@ function OwnerPortal({ session, onLogout }: { session: Session; onLogout: () => 
     </aside>
     <div className="frame"><header className="topbar"><div className="topbar-identity"><BrandLogo mobile /><div className="topbar-title"><h1>{sectionTitle}</h1>{section === 'summary' && <p>Today</p>}</div></div><button className="btn ghost logout-mobile" onClick={onLogout}>Sign out</button></header>
       <nav className="portal-tabs owner-tabs" aria-label="Owner sections">{navigation.map(({ id, label }) => <button type="button" key={id} className={section === id ? 'active' : ''} onClick={() => navigate(id)}>{label}</button>)}</nav>
-      <main className="portal-main">{section === 'board' ? <BoardView session={session} /> : section === 'summary' ? <DailySummaryView /> : section === 'history' ? <HistoryView session={session} /> : section === 'employees' ? <><div className="section-head"><div><h2>Team</h2><p>Manage who can sign in and work on vehicles.</p></div><span className="count-chip">{employees.filter((employee) => employee.active).length} active</span></div>
-        <div className="team-layout"><section className="panel team-list" aria-label="Employees"><div className="team-list-head"><strong>Employees</strong><span>{employees.length}</span></div>
-          {employees.length === 0 ? <div className="team-empty">No employees yet.</div> : employees.map((employee) => <div className="team-row" key={employee.id}><span className="who-dot">{employee.name.slice(0, 1)}</span><div className="team-person"><strong>{employee.name}</strong><small>{employee.mobile}{employee.branchName ? ` · ${employee.branchName}` : ''}</small></div><span className={`status-pill ${employee.active ? 'is-active' : ''}`}>{employee.active ? 'Active' : 'Inactive'}</span><button className="btn small" onClick={() => void toggle(employee)}>{employee.active ? 'Deactivate' : 'Activate'}</button></div>)}</section>
-          <form className="panel add-form" onSubmit={addEmployee}><h3>Add Employee</h3><Field label="Employee name" value={name} onChange={(event) => setName(event.target.value)} required /><Field label="Mobile number" type="tel" inputMode="tel" value={mobile} onChange={(event) => setMobile(event.target.value)} required />
-            {branches.length > 1 && <label className="field"><span>Branch</span><select className="input" value={branchId} onChange={(event) => setBranchId(event.target.value)}><option value="">All branches</option>{branches.map((branch) => <option value={branch.id} key={branch.id}>{branch.name}</option>)}</select></label>}
-            <button className="btn primary block" disabled={busy}>Add employee</button></form></div>
-        {error && <div className="portal-error" role="alert">{error}</div>}</> : section === 'customers' ? <CustomersView /> : section === 'vehicles' ? <VehiclesView /> : section === 'services' ? <ServicesView /> : section === 'billing' ? <BillingView /> : <OwnerSettings />}
-      </main></div>
+      <main className="portal-main">{content}</main></div>
   </div>;
 }
 

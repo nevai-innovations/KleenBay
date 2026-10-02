@@ -36,4 +36,12 @@ describe('PayU hosted checkout provider', () => {
     fetchMock.mockResolvedValueOnce(Response.json({ transaction_details: { KB123: { txnid: 'KB123', status: 'success', unmappedstatus: 'pending', transaction_amount: '7200.00', mihpayid: 'payu-1' } } }));
     expect((await provider.verifyTransaction('KB123'))?.status).toBe('pending');
   });
+
+  it('uses the separate production verification host and treats an unknown transaction as pending', async () => {
+    const live = new PayUPaymentProvider('merchant-key', 'merchant-salt', 'https://secure.payu.in');
+    const fetchMock = vi.fn(async (_url: string) => Response.json({ status: 0, transaction_details: { KB123: { mihpayid: 'Not Found', status: 'Not Found' } } }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await live.verifyTransaction('KB123')).toBeNull();
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe('https://info.payu.in/merchant/postservice.php?form=2');
+  });
 });

@@ -56,11 +56,12 @@ export function BillingView() {
   if (!billing) return <div className="billing-page"><div role="alert">{error || 'Billing is unavailable'}</div><button className="btn" onClick={() => { setLoading(true); void refresh(); }}>Retry</button></div>;
 
   const status = billing.subscription.status;
+  const statusLabel: Record<string, string> = { INACTIVE: 'Not subscribed', PAYMENT_PENDING: 'Payment pending', PAYMENT_FAILED: 'Payment unsuccessful', EXPIRED: 'Expired', ACTIVE: 'Active' };
   const pending = billing.payments.find((payment) => payment.status === 'INITIATED');
   return <div className="billing-page">
     <div className="section-head"><div><h2>Subscription</h2><p>Manage your KleenBay plan.</p></div></div>
     <section className="panel billing-panel" aria-label="KleenBay subscription">
-      <div className="billing-heading"><div><h3>{billing.plan.name}</h3><strong>{money(billing.plan.pricePaise)} / year</strong></div><span className="status-pill is-active">{status === 'INACTIVE' ? 'Not subscribed' : status === 'PAYMENT_PENDING' ? 'Payment pending' : status === 'PAYMENT_FAILED' ? 'Payment unsuccessful' : status === 'EXPIRED' ? 'Expired' : 'Active'}</span></div>
+      <div className="billing-heading"><div><h3>{billing.plan.name}</h3><strong>{money(billing.plan.pricePaise)} / year</strong></div><span className={`status-pill${status === 'ACTIVE' ? ' is-active' : ''}`}>{statusLabel[status] ?? status}</span></div>
       <p className="billing-note">WhatsApp Business API/provider charges are billed separately.</p>
       {status === 'ACTIVE' && billing.subscription.currentPeriodStart && billing.subscription.currentPeriodEnd && <div className="billing-facts"><p>Started <strong>{date(billing.subscription.currentPeriodStart)}</strong></p><p>Valid until <strong>{date(billing.subscription.currentPeriodEnd)}</strong></p><p>Days remaining <strong>{billing.subscription.daysRemaining}</strong></p></div>}
       {status === 'EXPIRED' && billing.subscription.currentPeriodEnd && <p>Expired on {date(billing.subscription.currentPeriodEnd)}.</p>}

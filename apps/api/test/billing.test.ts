@@ -64,6 +64,7 @@ describe('owner-only billing', () => {
 
   it('charges the server plan and cannot be pointed at another organization', async () => {
     expect((await startCheckout(ownerCookie, { payerMobile: '9876543210', amount: 1, organizationId: 'foreign' })).statusCode).toBe(400);
+    expect((await startCheckout(ownerCookie, { payerMobile: 'invalid' })).statusCode).toBe(400);
     const response = await startCheckout();
     expect(response.statusCode).toBe(200);
     expect(response.json().fields.amount).toBe('7200.00');

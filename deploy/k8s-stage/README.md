@@ -33,6 +33,13 @@ commands. Do not use the current default context or namespace implicitly.
 
 ## Release order
 
+Run `./deploy/k8s-stage/assert-main.ps1` from the repository root before
+building or deploying. It fetches `origin/main` and stops unless the local
+checkout is clean `main` at exactly the same commit. Build both images from
+that verified commit, tag them with its SHA, and record their immutable ECR
+digests in the manifests. Never build a stage release from an uncommitted
+checkout or a feature branch.
+
 1. Verify AWS account, Kubernetes context, certificate, RDS backup/capacity,
    and image digests. Confirm the namespace is not already in use.
 2. Apply `namespace.yaml` and `config.yaml`; create the four secrets without

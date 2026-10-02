@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { BillingView } from './BillingView';
 
 const base = {
@@ -9,7 +10,7 @@ const base = {
   subscription: { status: 'INACTIVE', currentPeriodStart: null, currentPeriodEnd: null, daysRemaining: 0 },
   payments: [] as object[],
 };
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); document.querySelectorAll('form[action="https://test.payu.in/_payment"]').forEach((form) => form.remove()); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('owner billing view', () => {
   it('shows loading, authoritative inactive state and an honest empty history', async () => {
@@ -44,5 +45,26 @@ describe('owner billing view', () => {
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Billing unavailable');
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
     expect(screen.queryByText('Action Required')).toBeNull();
+  });
+
+  it('submits the server-signed checkout to PayU and links to real policy routes', async () => {
+    const requests: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      requests.push(path);
+      if (path.endsWith('/billing/checkout')) return Response.json({ transactionId: 'KB123', action: 'https://test.payu.in/_payment', fields: { txnid: 'KB123', amount: '7200.00', hash: 'server-hash' } });
+      return Response.json(base);
+    }));
+    const submit = vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(() => {});
+    render(<BillingView />);
+    const user = userEvent.setup();
+    await screen.findByRole('heading', { name: 'KleenBay Annual' });
+    await user.type(screen.getByRole('textbox', { name: 'Payment contact mobile number' }), '9876543210');
+    await user.click(screen.getByRole('button', { name: /Subscribe for/ }));
+    expect(requests).toContain('/api/billing/checkout');
+    expect(submit).toHaveBeenCalledOnce();
+    const form = document.querySelector<HTMLFormElement>('form[action="https://test.payu.in/_payment"]');
+    expect(form?.querySelector<HTMLInputElement>('[name="amount"]')?.value).toBe('7200.00');
+    expect(screen.getByRole('link', { name: 'Terms' }).getAttribute('href')).toBe('/terms');
+    expect(screen.getByRole('link', { name: 'Refunds' }).getAttribute('href')).toBe('/refund-policy');
   });
 });

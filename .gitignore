@@ -16,6 +16,7 @@ apps/api/src/generated/
 # Test artifacts
 playwright-report/
 test-results/
+/outputs/
 
 # OS / editor
 .DS_Store

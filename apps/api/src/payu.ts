@@ -54,9 +54,10 @@ export class PayUPaymentProvider implements PaymentProvider {
   async verifyTransaction(transactionId: string): Promise<PayUResult | null> {
     const command = 'verify_payment';
     const body = new URLSearchParams({ key: this.key, command, var1: transactionId, hash: sha512(`${this.key}|${command}|${transactionId}|${this.salt}`) });
-    const response = await fetch(`${this.baseUrl}/merchant/postservice?form=2`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body, signal: AbortSignal.timeout(10_000) });
+    const verifyUrl = this.baseUrl === 'https://secure.payu.in' ? 'https://info.payu.in/merchant/postservice.php?form=2' : `${this.baseUrl}/merchant/postservice?form=2`;
+    const response = await fetch(verifyUrl, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body, signal: AbortSignal.timeout(10_000) });
     if (!response.ok) throw new Error('PayU verification unavailable');
-    const parsed = z.object({ transaction_details: z.record(z.string(), z.object({ txnid: z.string(), status: z.string(), unmappedstatus: z.string().optional(), transaction_amount: z.string().optional(), amt: z.string().optional(), mihpayid: z.union([z.string(), z.number()]).optional() }).passthrough()).optional() }).passthrough().parse(await response.json());
+    const parsed = z.object({ transaction_details: z.record(z.string(), z.object({ txnid: z.string().optional(), status: z.string(), unmappedstatus: z.string().optional(), transaction_amount: z.string().optional(), amt: z.string().optional(), mihpayid: z.union([z.string(), z.number()]).optional() }).passthrough()).optional() }).passthrough().parse(await response.json());
     const transaction = parsed.transaction_details?.[transactionId];
     if (!transaction || transaction.txnid !== transactionId) return null;
     const amountPaise = rupeesToPaise(transaction.transaction_amount ?? transaction.amt ?? '');

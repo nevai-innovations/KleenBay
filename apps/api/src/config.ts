@@ -32,7 +32,8 @@ const schema = z.object({
   MSG91_WIDGET_OTP_LENGTH: z.coerce.number().int().min(4).max(8).default(6),
   PAYU_MERCHANT_KEY: z.string().min(1).optional(),
   PAYU_MERCHANT_SALT: z.string().min(1).optional(),
-  PAYU_BASE_URL: z.string().url().optional(),
+  PAYU_BASE_URL: z.enum(['https://test.payu.in', 'https://secure.payu.in']).optional(),
+  BILLING_POLICIES_APPROVED: z.enum(['true', 'false']).default('false'),
   OTP_TTL_MINUTES: z.coerce.number().int().min(1).max(15).default(5),
   OTP_RESEND_SECONDS: z.coerce.number().int().min(15).max(300).default(60),
   OTP_MAX_ATTEMPTS: z.coerce.number().int().min(3).max(10).default(5),
@@ -58,6 +59,14 @@ export function getConfig() {
       throw new Error('Production requires HTTPS origin and secure cookies');
     }
   }
+  const payuConfigured = Boolean(env.PAYU_MERCHANT_KEY && env.PAYU_MERCHANT_SALT && env.PAYU_BASE_URL);
+  if (!payuConfigured && (env.PAYU_MERCHANT_KEY || env.PAYU_MERCHANT_SALT || env.PAYU_BASE_URL)) throw new Error('PayU requires merchant key, salt and base URL together');
+  if (payuConfigured) {
+    if (env.STAGING_MODE === 'true' && env.PAYU_BASE_URL !== 'https://test.payu.in') throw new Error('Stage PayU must use the test environment');
+    if (env.NODE_ENV !== 'production' && env.PAYU_BASE_URL !== 'https://test.payu.in') throw new Error('Local PayU must use the test environment');
+    if (env.NODE_ENV === 'production' && env.STAGING_MODE !== 'true' && env.PAYU_BASE_URL !== 'https://secure.payu.in') throw new Error('Production PayU must use the live environment');
+    if (env.NODE_ENV === 'production' && env.STAGING_MODE !== 'true' && env.BILLING_POLICIES_APPROVED !== 'true') throw new Error('Live PayU requires approved billing policies');
+  }
   if (env.MESSAGING_PROVIDER === 'msg91') throw new Error('MSG91 WhatsApp messaging is not configured or approved yet');
   if (env.NODE_ENV === 'production' && env.STAGING_MODE !== 'true' && env.MESSAGING_PROVIDER === 'mock') throw new Error('Mock messaging is limited to local development and stage');
   if (process.env.MSG91_TEMPLATE_ID !== undefined || process.env.OTP_PROVIDER === 'dummy') throw new Error('Unsupported OTP configuration');
@@ -73,14 +82,6 @@ export function getConfig() {
   } else if (msg91Configured) throw new Error('MSG91 credentials require OTP_PROVIDER=msg91');
   if (env.NODE_ENV === 'production' && env.STAGING_MODE !== 'true' && !msg91Otp) throw new Error('Production employee OTP requires MSG91');
   if (env.DEV_OTP_ENABLED === 'true' && !(env.DEV_OTP_FIXED_CODE ?? env.DEV_OTP_CODE)) throw new Error('DEV_OTP_FIXED_CODE is required for local OTP');
-  const payuConfigured = Boolean(env.PAYU_MERCHANT_KEY && env.PAYU_MERCHANT_SALT && env.PAYU_BASE_URL);
-  if (!payuConfigured && (env.PAYU_MERCHANT_KEY || env.PAYU_MERCHANT_SALT || env.PAYU_BASE_URL)) throw new Error('PayU requires merchant key, salt and base URL together');
-  if (payuConfigured) {
-    const host = new URL(env.PAYU_BASE_URL!).hostname;
-    if (!['test.payu.in', 'secure.payu.in'].includes(host) || !env.PAYU_BASE_URL!.startsWith('https://')) throw new Error('PayU must use an approved HTTPS host');
-    if (env.STAGING_MODE === 'true' && host !== 'test.payu.in') throw new Error('Stage PayU must use the test environment');
-    if (env.NODE_ENV === 'production' && env.STAGING_MODE !== 'true' && host !== 'secure.payu.in') throw new Error('Production PayU must use the live environment');
-  }
   return {
     ...env,
     DEV_OTP_FIXED_CODE: env.DEV_OTP_FIXED_CODE ?? env.DEV_OTP_CODE,
