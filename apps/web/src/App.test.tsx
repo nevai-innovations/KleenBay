@@ -30,7 +30,7 @@ function mockApi() {
   return requests;
 }
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(null, '', '/'); });
 
 describe('login screens', () => {
   it('switches from owner to employee and returns from verification to mobile entry', async () => {
@@ -69,6 +69,7 @@ describe('login screens', () => {
     expect(screen.queryByText('Sparkle Car Wash')).toBeNull();
     expect(screen.getByRole('button', { name: 'Check-in Vehicle' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Daily Summary' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Billing' })).toBeNull();
     await waitFor(() => expect(requests.find((request) => request.path.endsWith('/auth/employee/verify-otp'))?.body?.code).toBe('123456'));
   });
 });
@@ -103,5 +104,39 @@ describe('owner catalog', () => {
     await user.click(within(navigation).getByRole('button', { name: 'Services' }));
     await user.click(await screen.findByRole('button', { name: /Premium Wash/ }));
     expect(screen.getByText('₹499.00')).toBeTruthy();
+  });
+});
+
+describe('billing access', () => {
+  it('shows Billing only to owners and loads the owner page', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path.endsWith('/auth/me')) return Response.json(ownerSession);
+      if (path.endsWith('/employees') || path.endsWith('/branches')) return Response.json([]);
+      if (path.endsWith('/billing')) return Response.json({ plan: { code: 'KLEENBAY_ANNUAL', name: 'KleenBay Annual', pricePaise: 720000, currency: 'INR', billingInterval: 'YEAR' }, checkoutAvailable: false, subscription: { status: 'INACTIVE', currentPeriodStart: null, currentPeriodEnd: null, daysRemaining: 0 }, payments: [] });
+      if (path.startsWith('/api/jobs?')) return Response.json([]);
+      if (path.startsWith('/api/board/metrics')) return Response.json({ inBay: 0, ready: 0, late: 0 });
+      if (path.endsWith('/operations/available-employees')) return Response.json([]);
+      if (path.endsWith('/operations/capabilities')) return Response.json({ allowOutstanding: true, canHandover: true });
+      throw new Error(`Unexpected API request: ${path}`);
+    }));
+    render(<App />);
+    const navigation = await screen.findByRole('navigation', { name: 'Owner sections' });
+    await userEvent.click(within(navigation).getByRole('button', { name: 'Billing' }));
+    expect(window.location.pathname).toBe('/billing');
+    expect(await screen.findByRole('heading', { name: 'KleenBay Annual' })).toBeTruthy();
+  });
+
+  it('does not render Billing for employees, including a direct URL', async () => {
+    window.history.replaceState(null, '', '/billing');
+    const requests: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      requests.push(path);
+      if (path.endsWith('/auth/me')) return Response.json(employeeSession);
+      throw new Error(`Unexpected API request: ${path}`);
+    }));
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: 'Access denied' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Billing' })).toBeNull();
+    expect(requests).not.toContain('/api/billing');
   });
 });

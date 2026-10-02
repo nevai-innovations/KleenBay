@@ -17,6 +17,10 @@ const schema = z.object({
   DEV_OTP_ENABLED: z.enum(['true', 'false']).default('false'),
   STAGING_MODE: z.enum(['true', 'false']).default('false'),
   DEV_OTP_CODE: z.string().regex(/^\d{6}$/).default('123456'),
+  PAYU_MERCHANT_KEY: z.string().min(1).optional(),
+  PAYU_MERCHANT_SALT: z.string().min(1).optional(),
+  PAYU_BASE_URL: z.enum(['https://test.payu.in', 'https://secure.payu.in']).optional(),
+  BILLING_POLICIES_APPROVED: z.enum(['true', 'false']).default('false'),
   SESSION_HOURS: z.coerce.number().int().min(1).max(720).default(168),
   LOG_LEVEL: z.string().default('info'),
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
@@ -34,8 +38,17 @@ export function getConfig() {
       throw new Error('Production requires HTTPS origin and secure cookies');
     }
   }
+  const payuConfigured = Boolean(env.PAYU_MERCHANT_KEY && env.PAYU_MERCHANT_SALT && env.PAYU_BASE_URL);
+  if (!payuConfigured && (env.PAYU_MERCHANT_KEY || env.PAYU_MERCHANT_SALT || env.PAYU_BASE_URL)) throw new Error('PayU requires merchant key, salt and base URL together');
+  if (payuConfigured) {
+    if (env.STAGING_MODE === 'true' && env.PAYU_BASE_URL !== 'https://test.payu.in') throw new Error('Stage PayU must use the test environment');
+    if (env.NODE_ENV !== 'production' && env.PAYU_BASE_URL !== 'https://test.payu.in') throw new Error('Local PayU must use the test environment');
+    if (env.NODE_ENV === 'production' && env.STAGING_MODE !== 'true' && env.PAYU_BASE_URL !== 'https://secure.payu.in') throw new Error('Production PayU must use the live environment');
+    if (env.NODE_ENV === 'production' && env.STAGING_MODE !== 'true' && env.BILLING_POLICIES_APPROVED !== 'true') throw new Error('Live PayU requires approved billing policies');
+  }
   return {
     ...env,
+    payuConfigured,
     secureCookie: env.COOKIE_SECURE === 'true' || (env.COOKIE_SECURE === undefined && env.NODE_ENV === 'production'),
     devOtp: env.NODE_ENV !== 'production' && env.DEV_OTP_ENABLED === 'true',
     stagingMode: env.STAGING_MODE === 'true',

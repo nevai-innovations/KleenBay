@@ -51,6 +51,21 @@ enum PaymentMethod {
   OTHER
 }
 
+enum SubscriptionStatus {
+  INACTIVE
+  PAYMENT_PENDING
+  ACTIVE
+  EXPIRED
+  PAYMENT_FAILED
+}
+
+enum SubscriptionPaymentStatus {
+  INITIATED
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
 enum InvoiceStatus {
   ISSUED
   PARTIALLY_PAID
@@ -118,6 +133,51 @@ model Organization {
   inspections   VehicleInspection[]
   damageItems   InspectionDamageItem[]
   photos        Photo[]
+  subscription  Subscription?
+  subscriptionPayments SubscriptionPayment[]
+}
+
+model Subscription {
+  id                 String             @id @default(cuid())
+  organizationId     String             @unique
+  planCode           String             @default("KLEENBAY_ANNUAL")
+  status             SubscriptionStatus @default(INACTIVE)
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  activatedAt        DateTime?
+  cancelledAt        DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  organization       Organization       @relation(fields: [organizationId], references: [id])
+  payments           SubscriptionPayment[]
+
+  @@unique([id, organizationId])
+  @@index([organizationId, status])
+}
+
+model SubscriptionPayment {
+  id                    String                    @id @default(cuid())
+  organizationId        String
+  subscriptionId        String
+  provider              String                    @default("PAYU")
+  merchantTransactionId String                    @unique
+  providerTransactionId String?                   @unique
+  amountPaise           Int
+  currency              String                    @default("INR")
+  status                SubscriptionPaymentStatus @default(INITIATED)
+  initiatedAt           DateTime                  @default(now())
+  completedAt           DateTime?
+  failureReason         String?
+  providerStatus        String?
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  organization          Organization              @relation(fields: [organizationId], references: [id])
+  subscription          Subscription              @relation(fields: [subscriptionId, organizationId], references: [id, organizationId])
+
+  @@unique([id, organizationId])
+  @@index([organizationId, initiatedAt])
+  @@index([organizationId, status])
+  @@index([subscriptionId, organizationId])
 }
 
 model Branch {
