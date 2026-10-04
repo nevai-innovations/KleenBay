@@ -76,5 +76,8 @@ describe('messaging providers', () => {
   it('fails closed on provider errors', async () => {
     const provider = new Msg91WhatsAppProvider({ 'tenant-a:primary': 'secret-a' }, async () => new Response('{}', { status: 429 }));
     await expect(provider.send(message)).rejects.toThrow('MSG91 rejected');
+    const acceptedError = new Msg91WhatsAppProvider({ 'tenant-a:primary': 'secret-a' }, async () => new Response('{"status":"error"}', { status: 200 }));
+    await expect(acceptedError.send(message)).rejects.toThrow('MSG91 rejected');
+    await expect(provider.send({ ...message, recipient: '+1234' })).rejects.toThrow('not configured');
   });
 });

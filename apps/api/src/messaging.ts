@@ -24,7 +24,7 @@ export class Msg91WhatsAppProvider implements MessagingProvider {
 
   async send(input: Parameters<MessagingProvider['send']>[0]): Promise<{ providerMessageId: string | null }> {
     const authKey = input.organizationId && input.credentialRef && this.keys[`${input.organizationId}:${input.credentialRef}`];
-    if (!authKey || !input.integratedNumberId || !input.senderNumber || !input.templateVariables?.length || !/^[A-Za-z0-9_-]+$/.test(input.templateKey)) {
+    if (!authKey || !input.integratedNumberId || !input.senderNumber || !/^\+91[6-9]\d{9}$/.test(input.recipient) || !input.templateVariables?.length || input.templateVariables.length > 10 || !/^[A-Za-z0-9_-]+$/.test(input.templateKey)) {
       throw new Error('MSG91 sender or approved template is not configured');
     }
     const components = Object.fromEntries(input.templateVariables.map((value, index) => [`body_${index + 1}`, { type: 'text', value }]));
@@ -39,7 +39,7 @@ export class Msg91WhatsAppProvider implements MessagingProvider {
     });
     if (!response.ok) throw new Error('MSG91 rejected the message');
     const payload: unknown = await response.json();
-    if (!payload || typeof payload !== 'object' || ('success' in payload && payload.success === false) || ('type' in payload && payload.type === 'error')) throw new Error('MSG91 rejected the message');
+    if (!payload || typeof payload !== 'object' || ('success' in payload && payload.success === false) || ('type' in payload && payload.type === 'error') || ('status' in payload && ['error', 'failed', 'failure'].includes(String(payload.status).toLowerCase()))) throw new Error('MSG91 rejected the message');
     const result = payload as Record<string, unknown>;
     const id = result.message_id ?? result.messageId ?? result.request_id;
     return { providerMessageId: typeof id === 'string' ? id : null };
