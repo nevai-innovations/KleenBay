@@ -95,11 +95,29 @@ describe('public staging safeguards', () => {
     await expect(createMessagingProvider(getConfig()).send({ recipient: '+919876543210', text: 'test', templateKey: 'VEHICLE_RECEIVED', idempotencyKey: 'test' })).rejects.toThrow('Simulated provider failure');
   });
 
-  it('does not allow mock messaging in production or a premature MSG91 adapter', () => {
+  it('requires S3, MSG91 messaging and real OTP in production', async () => {
     vi.stubEnv('STAGING_MODE', 'false');
+    expect(() => getConfig()).toThrow('Production requires S3 storage');
+    vi.stubEnv('STORAGE_PROVIDER', 's3');
+    expect(() => getConfig()).toThrow('S3 storage requires');
+    vi.stubEnv('S3_BUCKET', 'kleenbay-private-test');
+    vi.stubEnv('S3_REGION', 'us-east-1');
     expect(() => getConfig()).toThrow('Mock messaging is limited');
     vi.stubEnv('MESSAGING_PROVIDER', 'msg91');
-    expect(() => getConfig()).toThrow('MSG91 WhatsApp messaging is not configured');
+    expect(() => getConfig()).toThrow('MSG91 WhatsApp requires scoped credential mapping');
+    vi.stubEnv('MSG91_WHATSAPP_AUTH_KEYS_JSON', '{"tenant-a:primary":"test-secret"}');
+    expect(() => getConfig()).toThrow('Production employee OTP requires MSG91');
+    vi.stubEnv('OTP_PROVIDER', 'MSG91');
+    vi.stubEnv('MSG91_AUTH_KEY', 'test-otp-key');
+    vi.stubEnv('MSG91_WIDGET_ID', 'widget');
+    vi.stubEnv('MSG91_WIDGET_TOKEN', 'test-widget-token');
+    vi.stubEnv('OTP_HASH_SECRET', 'a-test-hash-secret-over-thirty-two-chars');
+    const config = getConfig();
+    expect(config).toMatchObject({ STORAGE_PROVIDER: 's3', MESSAGING_PROVIDER: 'msg91', otpMode: 'msg91' });
+    const db = createDb(config.DATABASE_URL);
+    const app = await buildApp(config, db);
+    try { expect((await app.inject('/health')).statusCode).toBe(200); }
+    finally { await app.close(); await db.$disconnect(); }
   });
 
   it('refuses staging mode with development runtime settings', () => {

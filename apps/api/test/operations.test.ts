@@ -5,7 +5,7 @@ import { buildApp } from '../src/app.js';
 import { getConfig } from '../src/config.js';
 import { createDb } from '../src/db.js';
 import { assertLocalTestDatabase } from '../src/database-target.js';
-import type { MessagingProvider } from '../src/messaging.js';
+import { dispatchMessage, Msg91WhatsAppProvider, type MessagingProvider } from '../src/messaging.js';
 import type { StorageProvider } from '../src/storage.js';
 import { createTrackingToken, readTrackingToken } from '../src/tracking.js';
 
@@ -354,6 +354,28 @@ describe('vehicle operations', () => {
       expect((await request('PATCH', '/api/whatsapp/settings', { enabled: false }, ownerCookie)).statusCode).toBe(409);
     } finally {
       await db.organizationWhatsAppConfig.update({ where: { organizationId }, data: { provider: 'MOCK', status: 'MOCK_ACTIVE' } });
+    }
+  });
+
+  it('sends a previously failed tenant MSG91 message through its scoped sender and keeps attempt history', async () => {
+    await db.organizationWhatsAppConfig.update({ where: { organizationId }, data: { provider: 'MSG91', status: 'CONNECTED', credentialRef: 'primary', msg91IntegratedNumberId: 'integrated-test', senderNumber: '+919999999999' } });
+    try {
+      const created = await request('POST', '/api/jobs/check-in', checkIn('KL29AB1299'), ownerCookie);
+      expect(created.statusCode).toBe(201);
+      const id = created.json().id as string;
+      await vi.waitFor(async () => expect(await db.message.count({ where: { jobId: id, status: 'FAILED' } })).toBe(1));
+      const queued = await db.message.findFirstOrThrow({ where: { jobId: id } });
+      expect(queued.templateVariables).toEqual(['Test Driver', 'KL29AB1299', 'Operations Test', expect.stringContaining('/track/')]);
+      const requestProvider = vi.fn(async () => new Response(JSON.stringify({ message_id: 'msg91-test-id' }), { status: 200 }));
+      await db.message.update({ where: { id: queued.id }, data: { status: 'PENDING' } });
+      await dispatchMessage(db, new Msg91WhatsAppProvider({ [`${organizationId}:primary`]: 'test-auth-key' }, requestProvider as typeof fetch), queued.id);
+      const sentMessage = await db.message.findUniqueOrThrow({ where: { id: queued.id }, include: { deliveryAttempts: true } });
+      expect(sentMessage).toMatchObject({ status: 'SENT', providerMessageId: 'msg91-test-id', attempts: 2 });
+      expect(sentMessage.deliveryAttempts.map((attempt) => attempt.status)).toEqual(['FAILED', 'SENT']);
+      expect((await db.job.findUniqueOrThrow({ where: { id } })).status).toBe('RECEIVED');
+      expect(requestProvider).toHaveBeenCalledTimes(1);
+    } finally {
+      await db.organizationWhatsAppConfig.update({ where: { organizationId }, data: { provider: 'MOCK', status: 'MOCK_ACTIVE', credentialRef: null, msg91IntegratedNumberId: null, senderNumber: null } });
     }
   });
 

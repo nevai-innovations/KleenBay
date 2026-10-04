@@ -18,7 +18,11 @@ const schema = z.object({
   DEV_OTP_ENABLED: z.enum(['true', 'false']).default('false'),
   STAGING_MODE: z.enum(['true', 'false']).default('false'),
   POD_NAMESPACE: z.string().optional(),
+  STORAGE_PROVIDER: z.enum(['local', 's3']).default('local'),
+  S3_BUCKET: z.string().min(3).optional(),
+  S3_REGION: z.string().min(1).optional(),
   MESSAGING_PROVIDER: z.enum(['mock', 'msg91']).default('mock'),
+  MSG91_WHATSAPP_AUTH_KEYS_JSON: z.string().optional(),
   MOCK_MESSAGING_FAIL: z.enum(['true', 'false']).default('false'),
   DEV_OTP_FIXED_CODE: z.string().regex(/^\d{6}$/).optional(),
   DEV_OTP_CODE: z.string().regex(/^\d{6}$/).optional(),
@@ -68,7 +72,14 @@ export function getConfig() {
     if (env.NODE_ENV === 'production' && env.STAGING_MODE !== 'true' && env.PAYU_BASE_URL !== 'https://secure.payu.in') throw new Error('Production PayU must use the live environment');
     if (env.NODE_ENV === 'production' && env.STAGING_MODE !== 'true' && env.BILLING_POLICIES_APPROVED !== 'true') throw new Error('Live PayU requires approved billing policies');
   }
-  if (env.MESSAGING_PROVIDER === 'msg91') throw new Error('MSG91 WhatsApp messaging is not configured or approved yet');
+  if (env.NODE_ENV === 'production' && env.STAGING_MODE !== 'true' && env.STORAGE_PROVIDER !== 's3') throw new Error('Production requires S3 storage');
+  if (env.STORAGE_PROVIDER === 's3' && (!env.S3_BUCKET || !env.S3_REGION)) throw new Error('S3 storage requires S3_BUCKET and S3_REGION');
+  let whatsAppKeys: Record<string, string> = {};
+  if (env.MSG91_WHATSAPP_AUTH_KEYS_JSON) {
+    try { whatsAppKeys = z.record(z.string().regex(/^[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$/), z.string().min(1)).parse(JSON.parse(env.MSG91_WHATSAPP_AUTH_KEYS_JSON)); }
+    catch { throw new Error('Invalid MSG91 WhatsApp credential mapping'); }
+  }
+  if (env.MESSAGING_PROVIDER === 'msg91' && !Object.keys(whatsAppKeys).length) throw new Error('MSG91 WhatsApp requires scoped credential mapping');
   if (env.NODE_ENV === 'production' && env.STAGING_MODE !== 'true' && env.MESSAGING_PROVIDER === 'mock') throw new Error('Mock messaging is limited to local development and stage');
   if (process.env.MSG91_TEMPLATE_ID !== undefined || process.env.OTP_PROVIDER === 'dummy') throw new Error('Unsupported OTP configuration');
   const msg91Otp = env.OTP_PROVIDER === 'msg91' || env.OTP_PROVIDER === 'MSG91';
@@ -93,6 +104,7 @@ export function getConfig() {
     dummyOtp,
     otpMode: msg91Otp ? 'msg91' as const : dummyOtp ? 'dummy' as const : env.NODE_ENV !== 'production' && env.DEV_OTP_ENABLED === 'true' ? 'development' as const : 'unconfigured' as const,
     stagingMode: env.STAGING_MODE === 'true',
+    whatsAppKeys,
     payuConfigured,
   };
 }

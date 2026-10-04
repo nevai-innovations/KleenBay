@@ -5,7 +5,7 @@ import { audit } from './audit.js';
 
 export interface MessagingProvider {
   readonly name: 'MOCK' | 'MSG91';
-  send(input: { recipient: string; text: string; templateKey: string; idempotencyKey: string; senderNumber?: string | null; senderDisplayName?: string | null; integratedNumberId?: string | null; credentialRef?: string | null }): Promise<{ providerMessageId: string | null }>;
+  send(input: { recipient: string; text: string; templateKey: string; templateVariables?: string[]; idempotencyKey: string; organizationId?: string; senderNumber?: string | null; senderDisplayName?: string | null; integratedNumberId?: string | null; credentialRef?: string | null }): Promise<{ providerMessageId: string | null }>;
 }
 
 export class MockMessagingProvider implements MessagingProvider {
@@ -18,17 +18,37 @@ export class MockMessagingProvider implements MessagingProvider {
   }
 }
 
-// Reserved adapter boundary; selecting MSG91 stays disabled until WhatsApp is approved.
 export class Msg91WhatsAppProvider implements MessagingProvider {
   readonly name = 'MSG91';
-  async send(): Promise<{ providerMessageId: string | null }> {
-    throw new Error('MSG91 WhatsApp messaging is not enabled');
+  constructor(private readonly keys: Record<string, string>, private readonly request: typeof fetch = fetch) {}
+
+  async send(input: Parameters<MessagingProvider['send']>[0]): Promise<{ providerMessageId: string | null }> {
+    const authKey = input.organizationId && input.credentialRef && this.keys[`${input.organizationId}:${input.credentialRef}`];
+    if (!authKey || !input.integratedNumberId || !input.senderNumber || !input.templateVariables?.length || !/^[A-Za-z0-9_-]+$/.test(input.templateKey)) {
+      throw new Error('MSG91 sender or approved template is not configured');
+    }
+    const components = Object.fromEntries(input.templateVariables.map((value, index) => [`body_${index + 1}`, { type: 'text', value }]));
+    const response = await this.request('https://control.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/', {
+      method: 'POST',
+      headers: { accept: 'application/json', authkey: authKey, 'content-type': 'application/json' },
+      body: JSON.stringify({ integrated_number: input.integratedNumberId, content_type: 'template', payload: {
+        type: 'template', template: { name: input.templateKey, language: { code: 'en', policy: 'deterministic' },
+          to_and_components: [{ to: [input.recipient.replace(/^\+/, '')], components }] }, messaging_product: 'whatsapp',
+      } }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new Error('MSG91 rejected the message');
+    const payload: unknown = await response.json();
+    if (!payload || typeof payload !== 'object' || ('success' in payload && payload.success === false) || ('type' in payload && payload.type === 'error')) throw new Error('MSG91 rejected the message');
+    const result = payload as Record<string, unknown>;
+    const id = result.message_id ?? result.messageId ?? result.request_id;
+    return { providerMessageId: typeof id === 'string' ? id : null };
   }
 }
 
 export function createMessagingProvider(config: Config): MessagingProvider {
   if (config.MESSAGING_PROVIDER === 'mock') return new MockMessagingProvider(config.MOCK_MESSAGING_FAIL === 'true');
-  throw new Error('MSG91 WhatsApp messaging is not enabled');
+  return new Msg91WhatsAppProvider(config.whatsAppKeys);
 }
 
 export function renderCustomerMessage(event: MessageEvent, customerName: string, vehicleNumber: string, businessName: string, trackingUrl?: string) {
@@ -48,8 +68,7 @@ export function messageRecipient(mobile: string) {
 export async function dispatchMessage(db: Db, provider: MessagingProvider, id: string) {
   const message = await db.message.findUnique({ where: { id } });
   if (!message || message.status !== 'PENDING') return;
-  const selectedProvider = message.provider === 'MOCK' ? provider : new Msg91WhatsAppProvider();
-  if (selectedProvider.name !== message.provider) throw new Error('Configured messaging provider does not match queued message');
+  const selectedProvider = provider;
   const claimed = await db.message.updateMany({
     where: { id, status: 'PENDING', attempts: message.attempts },
     data: { attempts: { increment: 1 }, status: 'SENDING' },
@@ -57,12 +76,15 @@ export async function dispatchMessage(db: Db, provider: MessagingProvider, id: s
   if (!claimed.count) return;
   const attempt = message.attempts + 1;
   try {
+    if (selectedProvider.name !== message.provider) throw new Error('Configured messaging provider does not match queued message');
     if (message.provider === 'MOCK') {
       const simulated = await db.organizationWhatsAppConfig.updateMany({ where: { organizationId: message.organizationId, provider: 'MOCK', mockFailNext: true }, data: { mockFailNext: false } });
       if (simulated.count) throw new Error('Simulated provider failure');
     }
     const organizationConfig = message.provider === 'MSG91' ? await db.organizationWhatsAppConfig.findUnique({ where: { organizationId: message.organizationId } }) : null;
-    const result = await selectedProvider.send({ recipient: message.recipient, text: message.renderedText, templateKey: message.templateKey, idempotencyKey: `${message.jobId}:${message.event}`, senderNumber: message.senderNumber, senderDisplayName: message.senderDisplayName, integratedNumberId: organizationConfig?.msg91IntegratedNumberId ?? null, credentialRef: organizationConfig?.credentialRef ?? null });
+    if (message.provider === 'MSG91' && (!organizationConfig?.enabled || organizationConfig.provider !== 'MSG91' || organizationConfig.status !== 'CONNECTED')) throw new Error('MSG91 sender is not active');
+    const variables = message.templateVariables;
+    const result = await selectedProvider.send({ recipient: message.recipient, text: message.renderedText, templateKey: message.templateKey, templateVariables: Array.isArray(variables) && variables.every((item) => typeof item === 'string') ? variables as string[] : undefined, idempotencyKey: `${message.jobId}:${message.event}`, organizationId: message.organizationId, senderNumber: message.senderNumber, senderDisplayName: message.senderDisplayName, integratedNumberId: organizationConfig?.msg91IntegratedNumberId ?? null, credentialRef: organizationConfig?.credentialRef ?? null });
     await db.$transaction(async (tx) => {
       await tx.message.update({ where: { id }, data: { status: 'SENT', providerMessageId: result.providerMessageId, sentAt: new Date(), failedAt: null, failureReason: null, nextRetryAt: null } });
       await tx.messageAttempt.create({ data: { organizationId: message.organizationId, messageId: id, number: attempt, status: 'SENT', providerMessageId: result.providerMessageId } });

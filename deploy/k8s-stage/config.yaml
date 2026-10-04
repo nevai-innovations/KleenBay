@@ -10,6 +10,7 @@ data:
   OTP_PROVIDER: DUMMY_OTP
   DUMMY_OTP: "123456"
   MESSAGING_PROVIDER: mock
+  STORAGE_PROVIDER: local
   MOCK_MESSAGING_FAIL: "false"
   APP_ORIGIN: https://stage.kleenbay.com
   COOKIE_SECURE: "true"

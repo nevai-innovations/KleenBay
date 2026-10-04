@@ -209,7 +209,9 @@ Repeat the test-database migration block in step 3. A normal
 - `.local-data/uploads`: gitignored local photo storage, not a production
   storage design.
 - AWS/RDS/S3: deployment concerns, separate from local development. See
-  [the stage runbook](deploy/k8s-stage/README.md) for stage-only operations.
+  [the stage runbook](deploy/k8s-stage/README.md) for stage-only operations and
+  [production infrastructure boundaries](docs/production-infrastructure.md)
+  for S3, MSG91 WhatsApp, proxy, headers, and image targets.
 
 The old [prototype](prototype/) is retained for UX reference only. It uses
 browser sample data and is not a replacement for the API-driven app.

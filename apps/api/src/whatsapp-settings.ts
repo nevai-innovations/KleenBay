@@ -32,8 +32,8 @@ const defaults = {
   lastVerifiedAt: null,
 };
 
-function safeConfig(record: Awaited<ReturnType<Db['organizationWhatsAppConfig']['findUnique']>>) {
-  if (!record) return defaults;
+function safeConfig(record: Awaited<ReturnType<Db['organizationWhatsAppConfig']['findUnique']>>, provider: 'mock' | 'msg91' = 'mock') {
+  if (!record) return provider === 'msg91' ? { ...defaults, provider: 'MSG91' as const, status: 'NOT_CONNECTED' as const } : defaults;
   const { credentialRef: _secretRef, mockFailNext: _mockFailNext, organizationId: _organizationId, createdAt: _createdAt, updatedAt: _updatedAt, ...safe } = record;
   return safe;
 }
@@ -41,7 +41,7 @@ function safeConfig(record: Awaited<ReturnType<Db['organizationWhatsAppConfig'][
 export function registerWhatsAppSettingsRoutes(app: FastifyInstance, db: Db, config: Config) {
   app.get('/api/whatsapp/settings', async (request) => {
     const owner = await requireOwner(db, request);
-    return safeConfig(await db.organizationWhatsAppConfig.findUnique({ where: { organizationId: owner.organizationId } }));
+    return safeConfig(await db.organizationWhatsAppConfig.findUnique({ where: { organizationId: owner.organizationId } }), config.MESSAGING_PROVIDER);
   });
 
   app.patch('/api/whatsapp/settings', async (request) => {
@@ -49,7 +49,8 @@ export function registerWhatsAppSettingsRoutes(app: FastifyInstance, db: Db, con
     const input = patchSchema.parse(request.body);
     return db.$transaction(async (tx) => {
       const before = await tx.organizationWhatsAppConfig.findUnique({ where: { organizationId: owner.organizationId } });
-      if (before?.provider === 'MSG91') throw new HttpError(409, 'PROVIDER_MANAGED', 'MSG91 sender configuration is not available yet');
+      if (config.MESSAGING_PROVIDER === 'msg91' && (!before || before.provider !== 'MSG91')) throw new HttpError(409, 'PROVIDER_MANAGED', 'MSG91 sender must be provisioned by the platform');
+      if (before?.provider === 'MSG91' && (config.MESSAGING_PROVIDER !== 'msg91' || Object.keys(input).some((key) => key !== 'enabled'))) throw new HttpError(409, 'PROVIDER_MANAGED', 'MSG91 sender and templates are platform-managed');
       const updated = await tx.organizationWhatsAppConfig.upsert({ where: { organizationId: owner.organizationId }, create: { organizationId: owner.organizationId, ...input }, update: input });
       await audit(tx, { organizationId: owner.organizationId, actorUserId: owner.id, action: 'WHATSAPP_SETTINGS_UPDATED', entityType: 'OrganizationWhatsAppConfig', entityId: owner.organizationId, before: safeConfig(before), after: safeConfig(updated), ipAddress: request.ip });
       return safeConfig(updated);

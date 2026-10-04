@@ -92,10 +92,13 @@ async function queueMessage(tx: Prisma.TransactionClient, job: { id: string; org
     await tx.job.update({ where: { id: job.id }, data: { trackingTokenHash: tokenHash, trackingTokenCiphertext: ciphertext } });
   }
   const url = organization.showCustomerTrackingLink ? trackingUrl(config.APP_ORIGIN, readTrackingToken(config.trackingSecret, ciphertext)) : undefined;
+  const templateVariables = event === 'VEHICLE_HANDED_OVER'
+    ? [businessName, vehicleNumber]
+    : [customer.name, vehicleNumber, businessName, ...(url ? [url] : [])];
   const message = await tx.message.upsert({
     where: { jobId_event: { jobId: job.id, event } },
     update: {},
-    create: { organizationId: job.organizationId, branchId: job.branchId, jobId: job.id, customerId: job.customerId, event, templateKey, recipient: messageRecipient(customer.mobile), renderedText: renderCustomerMessage(event, customer.name, vehicleNumber, businessName, url), provider: settings?.provider ?? 'MOCK', senderNumber: settings?.senderNumber ?? null, senderDisplayName: settings?.senderDisplayName ?? null, trackingTokenHash: tokenHash },
+    create: { organizationId: job.organizationId, branchId: job.branchId, jobId: job.id, customerId: job.customerId, event, templateKey, templateVariables, recipient: messageRecipient(customer.mobile), renderedText: renderCustomerMessage(event, customer.name, vehicleNumber, businessName, url), provider: settings?.provider ?? (config.MESSAGING_PROVIDER === 'msg91' ? 'MSG91' : 'MOCK'), senderNumber: settings?.senderNumber ?? null, senderDisplayName: settings?.senderDisplayName ?? null, trackingTokenHash: tokenHash },
   });
   return message.status === 'PENDING' && message.attempts === 0 ? message.id : null;
 }

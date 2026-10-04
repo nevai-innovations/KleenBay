@@ -22,7 +22,7 @@ import { registerPublicTrackingRoutes } from './public-tracking.js';
 import { registerDailySummaryRoutes } from './daily-summary.js';
 import { registerOwnerAccountRoutes } from './owner-accounts.js';
 import { registerWhatsAppSettingsRoutes } from './whatsapp-settings.js';
-import { LocalStorageProvider, type StorageProvider } from './storage.js';
+import { createStorageProvider, LocalStorageProvider, type StorageProvider } from './storage.js';
 import { createPaymentProvider, type PaymentProvider } from './payu.js';
 import { registerBillingRoutes } from './billing.js';
 
@@ -30,10 +30,10 @@ class RouteOnlyLogController extends LogController {
   constructor() { super({ disableRequestLogging: true }); }
 }
 
-export async function buildApp(config: Config, db: Db, otp: OtpProvider = createOtpProvider(config), messaging: MessagingProvider = createMessagingProvider(config), storage: StorageProvider = new LocalStorageProvider(), paymentProvider: PaymentProvider | null = createPaymentProvider(config)) {
+export async function buildApp(config: Config, db: Db, otp: OtpProvider = createOtpProvider(config), messaging: MessagingProvider = createMessagingProvider(config), storage: StorageProvider = createStorageProvider(config), paymentProvider: PaymentProvider | null = createPaymentProvider(config)) {
   if (config.NODE_ENV === 'production' && !config.stagingMode && messaging instanceof MockMessagingProvider) throw new Error('Configure a production messaging provider before startup');
   if (config.NODE_ENV === 'production' && !config.stagingMode && storage instanceof LocalStorageProvider) throw new Error('Configure a production storage provider before startup');
-  const app = Fastify({ logger: { level: config.LOG_LEVEL }, logController: new RouteOnlyLogController(), trustProxy: config.TRUST_PROXY_HOPS > 0 });
+  const app = Fastify({ logger: { level: config.LOG_LEVEL }, logController: new RouteOnlyLogController(), trustProxy: config.TRUST_PROXY_HOPS > 0 ? (_address, hop) => hop < config.TRUST_PROXY_HOPS : false });
   await app.register(cookie);
   await app.register(cors, { origin: config.APP_ORIGIN, credentials: true });
   await app.register(helmet, { contentSecurityPolicy: false });

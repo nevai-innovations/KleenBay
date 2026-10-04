@@ -30,6 +30,9 @@ commands. Do not use the current default context or namespace implicitly.
   overwrite an existing organization.
 - Build and test both images. The app, migration, and smoke-job manifests pin
   tested ECR images by digest; keep those used in a release aligned.
+  The API Dockerfile now has separate `runtime` (serving) and `migrate`
+  (Prisma CLI) targets. Build/push both targets and pin the migration Job to
+  the `migrate` digest before running it; the runtime image has no Prisma CLI.
 
 ## Release order
 
@@ -96,8 +99,9 @@ forbidden. No SMS was sent and no code appeared in the checked API logs.
 Customer status updates on stage use `MESSAGING_PROVIDER=mock`. Events and rendered
 text persist in the KleenBay stage database and are marked simulated sent; no SMS
 or WhatsApp status message leaves the application. `MOCK_MESSAGING_FAIL=true` is
-for controlled failure testing only. MSG91 WhatsApp remains disabled pending
-business verification, number connection, approved templates, and credentials.
+for controlled failure testing only. MSG91 WhatsApp is implemented but not
+configured on stage; live delivery still needs business verification, number
+connection, approved templates, credentials, and an explicit stage rollout.
 Do not use this public stage for real customer operations until those integrations
 and a production storage design are ready.
 
