@@ -171,6 +171,30 @@ export const paymentSchema = z.object({
   reference: z.string().trim().max(120).optional(),
   notes: z.string().trim().max(2000).optional(),
 });
+
+export const saleItemSchema = z.object({
+  kind: z.enum(['ADD_ON', 'PRODUCT']),
+  name: z.string().trim().min(2).max(120),
+  pricePaise: z.number().int().min(0).max(100_000_000),
+  active: z.boolean().default(true),
+});
+export const invoiceSettingsSchema = z.object({
+  gstRateBps: z.number().int().min(0).max(10000).nullable().optional(),
+  gstin: z.string().trim().max(20).nullable().optional(),
+  invoiceAddress: z.string().trim().max(500).nullable().optional(),
+  invoicePhone: z.string().trim().max(30).nullable().optional(),
+  allowCustomInvoiceItems: z.boolean().optional(),
+  employeeAddons: z.boolean().optional(),
+});
+export const invoiceDraftSchema = z.object({
+  items: z.array(z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('ADD_ON'), saleItemId: z.string().min(1), quantity: z.number().int().min(1).max(100) }),
+    z.object({ kind: z.literal('PRODUCT'), saleItemId: z.string().min(1), quantity: z.number().int().min(1).max(100) }),
+    z.object({ kind: z.literal('CUSTOM'), description: z.string().trim().min(2).max(200), quantity: z.number().int().min(1).max(100), unitPricePaise: z.number().int().min(0).max(100_000_000) }),
+  ])).max(40).default([]),
+  discountKind: z.enum(['NONE', 'FLAT', 'PERCENT']).default('NONE'),
+  discountValue: z.number().int().min(0).max(100_000_000).default(0),
+});
 export const operationSettingsSchema = z.object({
   allowOutstanding: z.boolean().optional(),
   employeeHandover: z.boolean().optional(),

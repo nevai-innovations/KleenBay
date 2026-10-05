@@ -54,7 +54,7 @@ export function registerDailySummaryRoutes(app: FastifyInstance, db: Db) {
       db.job.findMany({ where: { ...scope, handedOverAt: { gte: start, lt: end } }, select: { id: true, checkedInAt: true, handedOverAt: true, expectedAt: true } }),
       db.job.findMany({ where: { ...scope, status: { not: 'HANDED_OVER' } }, select: { id: true, status: true, expectedAt: true, stageAt: true, vehicle: { select: { registrationNumber: true } }, customer: { select: { name: true } } } }),
       db.payment.findMany({ where: { organizationId: owner.organizationId, createdAt: { gte: start, lt: end }, ...paymentBranch }, select: { amountPaise: true, method: true } }),
-      db.invoice.findMany({ where: { organizationId: owner.organizationId, issuedAt: { gte: start, lt: end }, ...invoiceBranch }, select: { jobId: true, totalPaise: true, payments: { select: { amountPaise: true } }, job: { select: { vehicle: { select: { registrationNumber: true } }, customer: { select: { name: true } } } } } }),
+      db.invoice.findMany({ where: { organizationId: owner.organizationId, status: { not: 'CANCELLED' }, issuedAt: { gte: start, lt: end }, ...invoiceBranch }, select: { jobId: true, totalPaise: true, payments: { select: { amountPaise: true } }, job: { select: { vehicle: { select: { registrationNumber: true } }, customer: { select: { name: true } } } } } }),
       db.jobStageHistory.findMany({ where: { organizationId: owner.organizationId, createdAt: { gte: start, lt: end }, actor: { role: 'EMPLOYEE' }, ...(branchId ? { job: { branchId } } : {}) }, select: { jobId: true, toStage: true, actor: { select: { id: true, name: true } } } }),
     ]);
 

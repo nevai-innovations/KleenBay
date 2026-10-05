@@ -195,7 +195,7 @@ describe('vehicle operations', () => {
     expect(employeeDetail.json().serviceName).toBe('Premium Wash');
     expect(employeeDetail.json().stages).toHaveLength(4);
     expect(employeeDetail.json().messages[0]).toEqual(expect.objectContaining({ event: 'VEHICLE_RECEIVED', status: 'SENT' }));
-    expect(Object.keys(employeeDetail.json()).sort()).toEqual(['id', 'number', 'status', 'serviceName', 'checkedInAt', 'stageAt', 'expectedAt', 'handedOverAt', 'notes', 'branch', 'customer', 'vehicle', 'checkedInBy', 'handedOverBy', 'stages', 'assignments', 'inspection', 'photos', 'messages'].sort());
+    expect(Object.keys(employeeDetail.json()).sort()).toEqual(['id', 'number', 'status', 'serviceName', 'checkedInAt', 'stageAt', 'expectedAt', 'handedOverAt', 'notes', 'branch', 'customer', 'vehicle', 'checkedInBy', 'handedOverBy', 'stages', 'assignments', 'inspection', 'photos', 'messages', 'selectedAddOns'].sort());
     expect(Object.keys(employeeDetail.json().messages[0]).sort()).toEqual(['id', 'event', 'status', 'createdAt', 'sentAt', 'failedAt'].sort());
     expectOperationalOnly(employeeDetail.json());
     expectOperationalOnly((await request('GET', '/api/jobs?view=history&q=KL29AB1234', undefined, employeeCookie)).json());

@@ -10,6 +10,7 @@ import { badRequest, forbidden, HttpError, notFound } from './errors.js';
 import { dispatchMessage, messageRecipient, renderCustomerMessage, type MessagingProvider } from './messaging.js';
 import { createTrackingToken, readTrackingToken, trackingUrl } from './tracking.js';
 import type { Config } from './config.js';
+import { activeInvoice, issueInvoice, prepareInvoice } from './invoices.js';
 
 const idParams = z.object({ id: z.string().min(1) });
 const listQuery = z.object({
@@ -38,7 +39,7 @@ async function getJob(db: Db, user: User, id: string) {
       stages: { include: { actor: { select: { id: true, name: true } } }, orderBy: { createdAt: 'asc' } },
       assignments: { include: { employee: { select: { id: true, name: true } } }, orderBy: { assignedAt: 'asc' } },
       messages: { include: { deliveryAttempts: { orderBy: { number: 'asc' } } }, orderBy: { createdAt: 'asc' } },
-      invoice: { include: { payments: { include: { collectedBy: { select: { id: true, name: true } } }, orderBy: { createdAt: 'asc' } } } },
+      invoices: { where: { status: { not: 'CANCELLED' } }, include: { items: { orderBy: { position: 'asc' } }, payments: { include: { collectedBy: { select: { id: true, name: true } } }, orderBy: { createdAt: 'asc' } } }, take: 1 },
       inspection: { include: { recordedBy: { select: { id: true, name: true } }, damages: true } },
       photos: { select: { id: true, kind: true, description: true, customerVisible: true, damageItemId: true, createdAt: true, uploadedBy: { select: { id: true, name: true } } }, orderBy: { createdAt: 'asc' } },
     },
@@ -70,11 +71,14 @@ async function getJob(db: Db, user: User, id: string) {
       } : null,
       photos: job.photos,
       messages: job.messages.map((message) => ({ id: message.id, event: message.event, status: message.status, createdAt: message.createdAt, sentAt: message.sentAt, failedAt: message.failedAt })),
+      selectedAddOns: job.invoices[0]?.items.filter((item) => item.kind === 'ADD_ON').map((item) => ({ description: item.description, quantity: item.quantity })) ?? [],
     };
   }
-  const paidPaise = job.invoice?.payments.reduce((sum, payment) => sum + payment.amountPaise, 0) ?? 0;
-  const { trackingTokenHash: _hash, trackingTokenCiphertext: _ciphertext, ...publicJob } = job;
-  return { ...publicJob, paidPaise, outstandingPaise: Math.max(0, job.totalPaise - paidPaise), paymentStatus: paidPaise === 0 ? 'UNPAID' : paidPaise < job.totalPaise ? 'PARTIALLY_PAID' : 'PAID' };
+  const invoice = job.invoices[0] ?? null;
+  const paidPaise = invoice?.payments.reduce((sum, payment) => sum + payment.amountPaise, 0) ?? 0;
+  const totalPaise = invoice?.totalPaise ?? job.totalPaise;
+  const { trackingTokenHash: _hash, trackingTokenCiphertext: _ciphertext, invoices: _invoices, ...publicJob } = job;
+  return { ...publicJob, invoice, totalPaise, paidPaise, outstandingPaise: Math.max(0, totalPaise - paidPaise), paymentStatus: paidPaise === 0 ? 'UNPAID' : paidPaise < totalPaise ? 'PARTIALLY_PAID' : 'PAID' };
 }
 
 async function queueMessage(tx: Prisma.TransactionClient, job: { id: string; organizationId: string; branchId: string; customerId: string; trackingTokenHash: string | null; trackingTokenCiphertext: string | null }, event: MessageEvent, customer: { name: string; mobile: string }, vehicleNumber: string, businessName: string, config: Config) {
@@ -119,8 +123,8 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
 
   app.get('/api/operations/capabilities', async (request) => {
     const user = await currentUser(db, request);
-    const org = await db.organization.findUniqueOrThrow({ where: { id: user.organizationId }, select: { allowOutstanding: true, employeeHandover: true } });
-    if (user.role === 'EMPLOYEE') return { canHandover: org.employeeHandover && org.allowOutstanding };
+    const org = await db.organization.findUniqueOrThrow({ where: { id: user.organizationId }, select: { allowOutstanding: true, employeeHandover: true, employeeAddons: true } });
+    if (user.role === 'EMPLOYEE') return { canHandover: org.employeeHandover && org.allowOutstanding, canAddOns: org.employeeAddons };
     return { allowOutstanding: org.allowOutstanding, canHandover: true };
   });
 
@@ -234,7 +238,7 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
       const org = await tx.organization.update({ where: { id: user.organizationId }, data: { nextJobNumber: { increment: 1 } }, select: { nextJobNumber: true, name: true } });
       const taxPaise = Math.round(priced.pricePaise * priced.service.taxRateBps / 10_000);
       const tracking = createTrackingToken(config.trackingSecret);
-      const job = await tx.job.create({ data: { organizationId: user.organizationId, branchId, customerId: customer.id, vehicleId: vehicle.id, serviceId: priced.service.id, number: org.nextJobNumber - 1, idempotencyKey: input.idempotencyKey, serviceName: priced.service.name, subtotalPaise: priced.pricePaise, taxPaise, totalPaise: priced.pricePaise + taxPaise, checkedInById: user.id, expectedAt, notes: input.notes, notify: input.notify, trackingTokenHash: tracking.hash, trackingTokenCiphertext: tracking.ciphertext } });
+      const job = await tx.job.create({ data: { organizationId: user.organizationId, branchId, customerId: customer.id, vehicleId: vehicle.id, serviceId: priced.service.id, number: org.nextJobNumber - 1, idempotencyKey: input.idempotencyKey, serviceName: priced.service.name, servicePricePaise: priced.pricePaise, serviceTaxRateBps: priced.service.taxRateBps, subtotalPaise: priced.pricePaise, taxPaise, totalPaise: priced.pricePaise + taxPaise, checkedInById: user.id, expectedAt, notes: input.notes, notify: input.notify, trackingTokenHash: tracking.hash, trackingTokenCiphertext: tracking.ciphertext } });
       await tx.jobStageHistory.create({ data: { organizationId: user.organizationId, jobId: job.id, toStage: 'RECEIVED', actorUserId: user.id, note: 'Vehicle checked in' } });
       for (const employeeId of employeeIds) {
         const assignment = await tx.jobAssignment.create({ data: { organizationId: user.organizationId, jobId: job.id, employeeId, assignedById: user.id } });
@@ -322,16 +326,20 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
       if (!job.organization.employeeHandover || !job.organization.allowOutstanding) forbidden();
       if (input.paymentAmountPaise !== 0 || input.paymentMethod || input.paymentReference) forbidden();
     }
-    if (input.paymentAmountPaise > job.totalPaise) badRequest('Payment cannot exceed the outstanding amount');
-    if (!job.organization.allowOutstanding && input.paymentAmountPaise !== job.totalPaise) badRequest('Full payment is required before handover');
     const messageId = await db.$transaction(async (tx) => {
+      let invoice = await activeInvoice(tx, user.organizationId, id);
+      if (!invoice) invoice = await prepareInvoice(tx, user.organizationId, id, user.id, request.ip, { items: [], discountKind: 'NONE', discountValue: 0 });
+      if (invoice.status === 'DRAFT') invoice = await issueInvoice(tx, invoice.id, user.organizationId, user.id, request.ip);
+      await tx.$queryRaw`SELECT "id" FROM "Invoice" WHERE "id" = ${invoice.id} FOR UPDATE`;
+      const paid = await tx.payment.aggregate({ where: { invoiceId: invoice.id, organizationId: user.organizationId }, _sum: { amountPaise: true } });
+      const remaining = invoice.totalPaise - (paid._sum.amountPaise ?? 0);
+      if (input.paymentAmountPaise > remaining) badRequest('Payment cannot exceed the outstanding amount');
+      if (!job.organization.allowOutstanding && input.paymentAmountPaise !== remaining) badRequest('Full payment is required before handover');
       const updated = await tx.job.updateMany({ where: { id, organizationId: user.organizationId, status: 'READY' }, data: { status: 'HANDED_OVER', stageAt: new Date(), handedOverAt: new Date(), handedOverById: user.id, handoverNotes: input.notes } });
       if (!updated.count) throw new HttpError(409, 'STAGE_CHANGED', 'Vehicle status changed. Refresh the board.');
-      const org = await tx.organization.update({ where: { id: user.organizationId }, data: { nextInvoiceNumber: { increment: 1 } }, select: { nextInvoiceNumber: true, invoicePrefix: true } });
-      const invoice = await tx.invoice.create({ data: { organizationId: user.organizationId, jobId: id, invoiceNumber: `${org.invoicePrefix}-${String(org.nextInvoiceNumber - 1).padStart(5, '0')}`, subtotalPaise: job.subtotalPaise, taxPaise: job.taxPaise, totalPaise: job.totalPaise, status: input.paymentAmountPaise === job.totalPaise ? 'PAID' : input.paymentAmountPaise > 0 ? 'PARTIALLY_PAID' : 'ISSUED' } });
-      await audit(tx, { organizationId: user.organizationId, actorUserId: user.id, action: 'INVOICE_ISSUED', entityType: 'Invoice', entityId: invoice.id, after: { invoiceNumber: invoice.invoiceNumber, totalPaise: invoice.totalPaise }, ipAddress: request.ip });
       if (input.paymentAmountPaise > 0 && input.paymentMethod) {
         const payment = await tx.payment.create({ data: { organizationId: user.organizationId, invoiceId: invoice.id, idempotencyKey: `handover:${id}`, amountPaise: input.paymentAmountPaise, method: input.paymentMethod, reference: input.paymentReference, collectedById: user.id } });
+        await tx.invoice.update({ where: { id: invoice.id }, data: { status: input.paymentAmountPaise === remaining ? 'PAID' : 'PARTIALLY_PAID' } });
         await audit(tx, { organizationId: user.organizationId, actorUserId: user.id, action: 'PAYMENT_COLLECTED', entityType: 'Payment', entityId: payment.id, after: { amountPaise: payment.amountPaise, method: payment.method, invoiceId: invoice.id }, ipAddress: request.ip });
       }
       await tx.jobStageHistory.create({ data: { organizationId: user.organizationId, jobId: id, fromStage: 'READY', toStage: 'HANDED_OVER', actorUserId: user.id, note: input.notes } });
@@ -346,17 +354,19 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
     const owner = await requireOwner(db, request);
     const { id } = idParams.parse(request.params);
     const input = paymentSchema.parse(request.body);
-    const job = await db.job.findFirst({ where: { id, organizationId: owner.organizationId }, include: { invoice: true } });
-    if (!job?.invoice) notFound();
+    const job = await db.job.findFirst({ where: { id, organizationId: owner.organizationId }, include: { invoices: { where: { status: { not: 'CANCELLED' } }, take: 1 } } });
+    const invoice = job?.invoices[0];
+    if (!invoice) notFound();
+    if (invoice.status === 'DRAFT') throw new HttpError(409, 'INVOICE_NOT_ISSUED', 'Issue invoice before collecting payment');
     const existing = await db.payment.findUnique({ where: { organizationId_idempotencyKey: { organizationId: owner.organizationId, idempotencyKey: input.idempotencyKey } } });
     if (existing) return reply.code(200).send(await getJob(db, owner, id));
     await db.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT "id" FROM "Invoice" WHERE "id" = ${job.invoice!.id} FOR UPDATE`;
-      const paid = await tx.payment.aggregate({ where: { invoiceId: job.invoice!.id }, _sum: { amountPaise: true } });
-      const remaining = job.totalPaise - (paid._sum.amountPaise ?? 0);
+      await tx.$queryRaw`SELECT "id" FROM "Invoice" WHERE "id" = ${invoice.id} FOR UPDATE`;
+      const paid = await tx.payment.aggregate({ where: { invoiceId: invoice.id, organizationId: owner.organizationId }, _sum: { amountPaise: true } });
+      const remaining = invoice.totalPaise - (paid._sum.amountPaise ?? 0);
       if (input.amountPaise > remaining) badRequest('Payment exceeds the outstanding amount');
-      const payment = await tx.payment.create({ data: { organizationId: owner.organizationId, invoiceId: job.invoice!.id, ...input, collectedById: owner.id } });
-      await tx.invoice.update({ where: { id: job.invoice!.id }, data: { status: input.amountPaise === remaining ? 'PAID' : 'PARTIALLY_PAID' } });
+      const payment = await tx.payment.create({ data: { organizationId: owner.organizationId, invoiceId: invoice.id, ...input, collectedById: owner.id } });
+      await tx.invoice.update({ where: { id: invoice.id }, data: { status: input.amountPaise === remaining ? 'PAID' : 'PARTIALLY_PAID' } });
       await audit(tx, { organizationId: owner.organizationId, actorUserId: owner.id, action: 'PAYMENT_COLLECTED', entityType: 'Payment', entityId: payment.id, after: { amountPaise: payment.amountPaise, method: payment.method, invoiceId: payment.invoiceId }, ipAddress: request.ip });
     });
     return reply.code(201).send(await getJob(db, owner, id));

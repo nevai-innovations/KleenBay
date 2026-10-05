@@ -80,9 +80,24 @@ enum SubscriptionPaymentStatus {
 }
 
 enum InvoiceStatus {
+  DRAFT
   ISSUED
   PARTIALLY_PAID
   PAID
+  CANCELLED
+}
+
+enum InvoiceItemKind {
+  SERVICE
+  ADD_ON
+  PRODUCT
+  CUSTOM
+}
+
+enum DiscountKind {
+  NONE
+  FLAT
+  PERCENT
 }
 
 enum PhotoKind {
@@ -122,6 +137,12 @@ model Organization {
   nextJobNumber Int       @default(1)
   nextInvoiceNumber Int   @default(1)
   invoicePrefix String    @default("KB")
+  gstRateBps Int?
+  gstin String?
+  invoiceAddress String?
+  invoicePhone String?
+  allowCustomInvoiceItems Boolean @default(false)
+  employeeAddons Boolean @default(false)
   allowOutstanding Boolean @default(true)
   employeeHandover Boolean @default(true)
   sendHandoverMessage Boolean @default(false)
@@ -147,6 +168,8 @@ model Organization {
   messageAttempts MessageAttempt[]
   whatsAppConfig OrganizationWhatsAppConfig?
   invoices      Invoice[]
+  invoiceItems InvoiceItem[]
+  saleItems SaleItem[]
   payments      Payment[]
   inspections   VehicleInspection[]
   damageItems   InspectionDamageItem[]
@@ -444,6 +467,8 @@ model Job {
   number         Int
   idempotencyKey String
   serviceName    String
+  servicePricePaise Int @default(0)
+  serviceTaxRateBps Int @default(0)
   subtotalPaise  Int
   taxPaise       Int
   totalPaise     Int
@@ -471,7 +496,7 @@ model Job {
   stages         JobStageHistory[]
   assignments    JobAssignment[]
   messages       Message[]
-  invoice        Invoice?
+  invoices       Invoice[]
   inspection     VehicleInspection?
   photos         Photo[]
 
@@ -594,21 +619,68 @@ model MessageAttempt {
 model Invoice {
   id             String        @id @default(cuid())
   organizationId String
-  jobId          String        @unique
+  jobId          String
   invoiceNumber  String
   subtotalPaise  Int
+  discountKind   DiscountKind  @default(NONE)
+  discountValue  Int           @default(0)
+  discountPaise  Int           @default(0)
+  taxablePaise   Int           @default(0)
   taxPaise       Int
   totalPaise     Int
-  status         InvoiceStatus @default(ISSUED)
-  issuedAt       DateTime      @default(now())
+  status         InvoiceStatus @default(DRAFT)
+  issuedAt       DateTime?
+  cancelledAt    DateTime?
+  replacesInvoiceId String?
+  createdAt      DateTime      @default(now())
   organization   Organization  @relation(fields: [organizationId], references: [id])
   job            Job           @relation(fields: [jobId, organizationId], references: [id, organizationId])
   payments       Payment[]
+  items          InvoiceItem[]
 
   @@unique([id, organizationId])
-  @@unique([jobId, organizationId])
   @@unique([organizationId, invoiceNumber])
   @@index([organizationId, issuedAt])
+  @@index([organizationId, jobId, status])
+}
+
+model SaleItem {
+  id             String          @id @default(cuid())
+  organizationId String
+  kind           InvoiceItemKind
+  name           String
+  pricePaise     Int
+  active         Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  invoiceItems   InvoiceItem[]
+
+  @@unique([id, organizationId])
+  @@unique([organizationId, kind, name])
+  @@index([organizationId, kind, active])
+}
+
+model InvoiceItem {
+  id             String          @id @default(cuid())
+  organizationId String
+  invoiceId      String
+  position       Int             @default(0)
+  saleItemId     String?
+  kind           InvoiceItemKind
+  description    String
+  quantity       Int
+  unitPricePaise Int
+  subtotalPaise  Int
+  taxRateBps     Int
+  taxPaise       Int
+  totalPaise     Int
+  createdAt      DateTime        @default(now())
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  invoice        Invoice         @relation(fields: [invoiceId, organizationId], references: [id, organizationId])
+  saleItem       SaleItem?        @relation(fields: [saleItemId, organizationId], references: [id, organizationId])
+
+  @@index([organizationId, invoiceId])
 }
 
 model Payment {

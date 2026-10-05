@@ -25,6 +25,7 @@ import { registerWhatsAppSettingsRoutes } from './whatsapp-settings.js';
 import { createStorageProvider, LocalStorageProvider, type StorageProvider } from './storage.js';
 import { createPaymentProvider, type PaymentProvider } from './payu.js';
 import { registerBillingRoutes } from './billing.js';
+import { registerInvoiceRoutes } from './invoices.js';
 
 class RouteOnlyLogController extends LogController {
   constructor() { super({ disableRequestLogging: true }); }
@@ -159,6 +160,7 @@ export async function buildApp(config: Config, db: Db, otp: OtpProvider = create
   registerPublicTrackingRoutes(app, db, storage, config);
   registerDailySummaryRoutes(app, db);
   registerBillingRoutes(app, db, config, paymentProvider);
+  registerInvoiceRoutes(app, db);
 
   return app;
 }

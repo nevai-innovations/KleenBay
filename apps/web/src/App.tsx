@@ -8,6 +8,7 @@ import { OwnerSetupView } from './OwnerSetupView';
 import { WhatsAppSettingsView } from './WhatsAppSettingsView';
 import { TrackingView } from './TrackingView';
 import { BillingView } from './BillingView';
+import { InvoicesView } from './InvoicesView';
 import { isLegalPath, LegalView } from './LegalView';
 import { captchaId, initializeWidget, sendWidgetOtp, verifyWidgetOtp, type Msg91WidgetConfig } from './msg91-otp';
 
@@ -142,9 +143,9 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   </div>;
 }
 
-type OwnerSection = 'board' | 'summary' | 'history' | 'employees' | 'customers' | 'vehicles' | 'services' | 'billing' | 'settings';
+type OwnerSection = 'board' | 'summary' | 'history' | 'employees' | 'customers' | 'vehicles' | 'services' | 'invoices' | 'billing' | 'settings';
 function OwnerPortal({ session, onLogout }: { session: Session; onLogout: () => void }) {
-  const [section, setSection] = useState<OwnerSection>(() => window.location.pathname === '/billing' ? 'billing' : 'board');
+  const [section, setSection] = useState<OwnerSection>(() => window.location.pathname.startsWith('/invoices') ? 'invoices' : window.location.pathname === '/billing' ? 'billing' : 'board');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [name, setName] = useState('');
@@ -179,13 +180,13 @@ function OwnerPortal({ session, onLogout }: { session: Session; onLogout: () => 
   }
 
   useEffect(() => {
-    const onPopState = () => setSection(window.location.pathname === '/billing' ? 'billing' : 'board');
+    const onPopState = () => setSection(window.location.pathname.startsWith('/invoices') ? 'invoices' : window.location.pathname === '/billing' ? 'billing' : 'board');
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
   function navigate(next: OwnerSection) {
     setSection(next);
-    window.history.pushState(null, '', next === 'billing' ? '/billing' : '/');
+    window.history.pushState(null, '', next === 'billing' ? '/billing' : next === 'invoices' ? '/invoices' : '/');
   }
 
   const navigation = [
@@ -196,6 +197,7 @@ function OwnerPortal({ session, onLogout }: { session: Session; onLogout: () => 
     { id: 'customers' as const, label: 'Customers', icon: ContactRound },
     { id: 'vehicles' as const, label: 'Vehicles', icon: CarFront },
     { id: 'services' as const, label: 'Services', icon: Sparkles },
+    { id: 'invoices' as const, label: 'Invoices', icon: CreditCard },
     { id: 'billing' as const, label: 'Billing', icon: CreditCard },
     { id: 'settings' as const, label: 'Settings', icon: Settings2 },
   ];
@@ -208,6 +210,7 @@ function OwnerPortal({ session, onLogout }: { session: Session; onLogout: () => 
     case 'customers': content = <CustomersView />; break;
     case 'vehicles': content = <VehiclesView />; break;
     case 'services': content = <ServicesView />; break;
+    case 'invoices': content = <InvoicesView />; break;
     case 'billing': content = <BillingView />; break;
     case 'settings': content = <OwnerSettings />; break;
     case 'employees': content = <>
@@ -265,6 +268,6 @@ export default function App() {
   if (loading) return <div className="loading-screen">KleenBay</div>;
   if (setupToken) return <OwnerSetupView token={setupToken} onComplete={() => { window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`); setSetupToken(null); }} />;
   if (!session) return <Login onLogin={setSession} />;
-  if (window.location.pathname === '/billing' && session.user.role !== 'OWNER') return <main className="login-page"><div className="login-box"><h1>Access denied</h1><p>Billing is available to owners only.</p><button className="btn" onClick={() => { window.history.replaceState(null, '', '/'); window.location.reload(); }}>Back to board</button></div></main>;
+  if ((window.location.pathname === '/billing' || window.location.pathname.startsWith('/invoices')) && session.user.role !== 'OWNER') return <main className="login-page"><div className="login-box"><h1>Access denied</h1><p>Owner access required.</p><button className="btn" onClick={() => { window.history.replaceState(null, '', '/'); window.location.reload(); }}>Back to board</button></div></main>;
   return <>{session.user.role === 'OWNER' ? <OwnerPortal session={session} onLogout={() => void logout()} /> : <EmployeePortal session={session} onLogout={() => void logout()} />}{logoutError && <div className="global-error" role="alert">{logoutError}</div>}</>;
 }

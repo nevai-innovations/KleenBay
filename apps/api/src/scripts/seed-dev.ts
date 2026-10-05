@@ -34,6 +34,9 @@ try {
       }
     }
   }
+  for (const [kind, name, pricePaise] of [['ADD_ON', 'Tyre polish', 9900], ['ADD_ON', 'Dashboard polish', 12900], ['ADD_ON', 'Engine bay cleaning', 29900], ['ADD_ON', 'Seat cleaning', 39900], ['PRODUCT', 'Air freshener', 14900]] as const) {
+    await db.saleItem.upsert({ where: { organizationId_kind_name: { organizationId: org.id, kind, name } }, update: {}, create: { organizationId: org.id, kind, name, pricePaise } });
+  }
   const customerFixtures = [
     { name: 'Meera Nair', mobile: '+919845612300', plate: 'KL07AB1234', make: 'Hyundai', model: 'i20', type: 'HATCHBACK' as const },
     { name: 'Arjun Shah', mobile: '+919845612301', plate: '22BH1234AA', make: 'Tata', model: 'Nexon', type: 'SUV' as const },
@@ -66,7 +69,7 @@ try {
       const expectedAt = new Date(checkedInAt.getTime() + service.estimatedMinutes * 60_000);
       const job = await tx.job.create({ data: {
         organizationId: org.id, branchId: branch.id, customerId: customer.id, vehicleId: vehicle.id, serviceId: service.id,
-        number: current.nextJobNumber - 1, idempotencyKey, serviceName: service.name, subtotalPaise, taxPaise: 0, totalPaise: subtotalPaise,
+        number: current.nextJobNumber - 1, idempotencyKey, serviceName: service.name, servicePricePaise: subtotalPaise, serviceTaxRateBps: 0, subtotalPaise, taxPaise: 0, totalPaise: subtotalPaise,
         status: fixture.status, checkedInAt, stageAt: checkedInAt, checkedInById: seedOwner.id, expectedAt,
         handedOverAt: fixture.status === 'HANDED_OVER' ? new Date(checkedInAt.getTime() + 75 * 60_000) : undefined,
         handedOverById: fixture.status === 'HANDED_OVER' ? seedOwner.id : undefined,
@@ -81,7 +84,10 @@ try {
         await tx.jobAssignment.create({ data: { organizationId: org.id, jobId: job.id, employeeId: assignedEmployee.id, assignedById: seedOwner.id } });
       }
       if (fixture.status === 'HANDED_OVER') {
-        const invoice = await tx.invoice.create({ data: { organizationId: org.id, jobId: job.id, invoiceNumber: `${current.invoicePrefix}-${String(current.nextInvoiceNumber - 1).padStart(5, '0')}`, subtotalPaise, taxPaise: 0, totalPaise: subtotalPaise, status: 'PARTIALLY_PAID', issuedAt: job.handedOverAt! } });
+        const year = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', year: 'numeric' }).format(job.handedOverAt!);
+        const invoice = await tx.invoice.create({ data: { organizationId: org.id, jobId: job.id, invoiceNumber: `${current.invoicePrefix}-${year}-${String(current.nextInvoiceNumber - 1).padStart(6, '0')}`, subtotalPaise, taxablePaise: subtotalPaise, taxPaise: 0, totalPaise: subtotalPaise } });
+        await tx.invoiceItem.create({ data: { organizationId: org.id, invoiceId: invoice.id, kind: 'SERVICE', description: service.name, quantity: 1, unitPricePaise: subtotalPaise, subtotalPaise, taxRateBps: 0, taxPaise: 0, totalPaise: subtotalPaise } });
+        await tx.invoice.update({ where: { id: invoice.id }, data: { status: 'PARTIALLY_PAID', issuedAt: job.handedOverAt! } });
         await tx.payment.create({ data: { organizationId: org.id, invoiceId: invoice.id, idempotencyKey: 'seed:payment:history', amountPaise: Math.floor(subtotalPaise / 2), method: 'UPI', collectedById: seedOwner.id, createdAt: job.handedOverAt! } });
       }
       await tx.auditLog.create({ data: { organizationId: org.id, actorUserId: seedOwner.id, action: 'SEED_JOB_CREATED', entityType: 'Job', entityId: job.id, after: { status: fixture.status, number: job.number } } });
