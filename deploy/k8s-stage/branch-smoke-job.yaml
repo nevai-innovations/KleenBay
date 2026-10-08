@@ -15,7 +15,7 @@ spec:
         runAsGroup: 1000
       containers:
         - name: smoke
-          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-api@sha256:74216acaac9fb476b4cace579990fe6eb2f339e31cccfd6eb05e20a3a08bd034
+          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-api@sha256:728da6e6f6bb8066508e56e133242a3b7a5bd81a5d1f361fe8b3b63f43f30d9e
           command: [node, apps/api/dist/scripts/stage-branch-smoke.js]
           envFrom:
             - configMapRef:
