@@ -113,7 +113,7 @@ export function registerCatalogRoutes(app: FastifyInstance, db: Db) {
 
   app.get('/api/services', async (request) => {
     const user = await currentUser(db, request);
-    const services = await db.service.findMany({ where: { organizationId: user.organizationId, ...(user.role === 'EMPLOYEE' ? { active: true, ...(user.branchId ? { OR: [{ branches: { none: { branchId: user.branchId } } }, { branches: { some: { branchId: user.branchId, active: true } } }] } : {}) } : {}) }, include: { prices: true, branches: true }, orderBy: { name: 'asc' } });
+    const services = await db.service.findMany({ where: { organizationId: user.organizationId, ...(user.role === 'EMPLOYEE' ? { active: true, ...(user.branchId ? { OR: [{ branches: { none: { branchId: user.branchId } } }, { branches: { some: { branchId: user.branchId, active: true } } }] } : { id: '__unassigned__' }) } : {}) }, include: { prices: true, branches: true }, orderBy: { name: 'asc' } });
     if (user.role === 'EMPLOYEE') return services.map(({ prices: _prices, branches: _branches, basePricePaise: _basePricePaise, taxRateBps: _taxRateBps, ...operational }) => operational);
     return services;
   });

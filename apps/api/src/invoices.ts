@@ -131,7 +131,7 @@ export function registerInvoiceRoutes(app: FastifyInstance, db: Db) {
     await db.$transaction(async (tx) => {
       const org = await tx.organization.findUniqueOrThrow({ where: { id: employee.organizationId }, select: { employeeAddons: true } });
       if (!org.employeeAddons) forbidden();
-      const job = await tx.job.findFirst({ where: { id, organizationId: employee.organizationId, ...(employee.branchId ? { branchId: employee.branchId } : {}), status: { not: 'HANDED_OVER' } } });
+      const job = await tx.job.findFirst({ where: { id, organizationId: employee.organizationId, branchId: employee.branchId ?? '__unassigned__', status: { not: 'HANDED_OVER' } } });
       if (!job) notFound();
       const item = await tx.saleItem.findFirst({ where: { id: saleItemId, organizationId: employee.organizationId, kind: 'ADD_ON', active: true } });
       if (!item) notFound();
@@ -168,16 +168,23 @@ export function registerInvoiceRoutes(app: FastifyInstance, db: Db) {
   });
   app.get('/api/invoices', async (request) => {
     const owner = await requireOwner(db, request);
-    const { q, from, to, customerId, vehicleId } = z.object({ q: z.string().trim().max(120).default(''), from: z.iso.date().optional(), to: z.iso.date().optional(), customerId: z.string().optional(), vehicleId: z.string().optional() }).parse(request.query);
+    const { q, from, to, customerId, vehicleId, branchId } = z.object({ q: z.string().trim().max(120).default(''), from: z.iso.date().optional(), to: z.iso.date().optional(), customerId: z.string().optional(), vehicleId: z.string().optional(), branchId: z.string().optional() }).parse(request.query);
+    if (branchId && !await db.branch.findFirst({ where: { id: branchId, organizationId: owner.organizationId } })) notFound();
     const number = q.toUpperCase().replace(/[^A-Z0-9]/g, '');
     const digits = q.replace(/\D/g, '');
-    const invoices = await db.invoice.findMany({ where: { organizationId: owner.organizationId, ...(customerId || vehicleId ? { job: { ...(customerId ? { customerId } : {}), ...(vehicleId ? { vehicleId } : {}) } } : {}), ...(from || to ? { createdAt: { ...(from ? { gte: new Date(`${from}T00:00:00.000Z`) } : {}), ...(to ? { lt: new Date(new Date(`${to}T00:00:00.000Z`).getTime() + 86_400_000) } : {}) } } : {}), ...(q ? { OR: [
+    const invoices = await db.invoice.findMany({ where: { organizationId: owner.organizationId, ...(customerId || vehicleId || branchId ? { job: { ...(customerId ? { customerId } : {}), ...(vehicleId ? { vehicleId } : {}), ...(branchId ? { branchId } : {}) } } : {}), ...(from || to ? { createdAt: { ...(from ? { gte: new Date(`${from}T00:00:00.000Z`) } : {}), ...(to ? { lt: new Date(new Date(`${to}T00:00:00.000Z`).getTime() + 86_400_000) } : {}) } } : {}), ...(q ? { OR: [
       { invoiceNumber: { contains: q, mode: 'insensitive' } },
       { job: { customer: { name: { contains: q, mode: 'insensitive' } } } },
       ...(digits.length >= 3 ? [{ job: { customer: { mobile: { contains: digits } } } }] : []),
       ...(number.length >= 2 ? [{ job: { vehicle: { registrationNumber: { contains: number } } } }] : []),
-    ] } : {}) }, include: { job: { select: { customer: { select: { name: true, mobile: true } }, vehicle: { select: { registrationNumber: true } }, number: true } }, payments: { select: { amountPaise: true } } }, orderBy: { createdAt: 'desc' }, take: 150 });
+    ] } : {}) }, include: { job: { select: { customer: { select: { name: true, mobile: true } }, vehicle: { select: { registrationNumber: true } }, branch: { select: { id: true, name: true } }, number: true } }, payments: { select: { amountPaise: true } } }, orderBy: { createdAt: 'desc' }, take: 150 });
     return invoices.map((invoice) => ({ ...invoice, paidPaise: invoice.payments.reduce((sum, payment) => sum + payment.amountPaise, 0), outstandingPaise: Math.max(0, invoice.totalPaise - invoice.payments.reduce((sum, payment) => sum + payment.amountPaise, 0)) }));
+  });
+  app.get('/api/payments', async (request) => {
+    const owner = await requireOwner(db, request);
+    const { branchId } = z.object({ branchId: z.string().optional() }).parse(request.query);
+    if (branchId && !await db.branch.findFirst({ where: { id: branchId, organizationId: owner.organizationId } })) notFound();
+    return db.payment.findMany({ where: { organizationId: owner.organizationId, ...(branchId ? { invoice: { job: { branchId } } } : {}) }, select: { id: true, amountPaise: true, method: true, reference: true, createdAt: true, collectedBy: { select: { name: true } }, invoice: { select: { id: true, invoiceNumber: true, job: { select: { branch: { select: { id: true, name: true } }, vehicle: { select: { registrationNumber: true } } } } } } }, orderBy: { createdAt: 'desc' }, take: 150 });
   });
   app.get('/api/invoices/:id', async (request) => {
     const owner = await requireOwner(db, request);

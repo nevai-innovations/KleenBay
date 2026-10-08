@@ -64,7 +64,7 @@ export function DailySummaryView() {
     {(currentError || branchError) && <p className="portal-error" role="alert">{currentError || branchError}</p>}
     {!summary && !currentError ? <p className="daily-loading">Loading daily summary...</p> : summary && <>
       <div className="kpis daily-kpis">
-        <div className="kpi"><span>Cars received</span><b>{summary.receivedCount}</b><small>{summary.handedOverCount} handed over today · {summary.stillOnBoardCount} from today still on board</small></div>
+        <div className="kpi"><span>Cars received</span><b>{summary.receivedCount}</b><small>{summary.activeCount} active · {summary.readyCount} ready · {summary.handedOverCount} handed over today</small></div>
         <div className="kpi daily-money"><span>Collected</span><b>{money(summary.collectedPaise)}</b><small>{collectionMethods || 'No payments collected today'}</small></div>
         <div className={`kpi${summary.unpaidPaise > 0 ? ' daily-unpaid' : ''}`}><span>Unpaid</span><b>{money(summary.unpaidPaise)}</b><small>{summary.unpaidInvoiceCount} {summary.unpaidInvoiceCount === 1 ? 'invoice' : 'invoices'} today · {money(summary.pipelinePaise)} still on board</small></div>
         <div className="kpi"><span>Avg turnaround</span><b>{turnaround(summary.avgTurnaroundMinutes)}</b><small>{summary.lateCount} late or overdue</small></div>

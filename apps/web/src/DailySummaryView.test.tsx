@@ -7,7 +7,7 @@ import { DailySummaryView } from './DailySummaryView';
 
 const base: DailySummary = {
   date: '2026-10-01', timeZone: 'Asia/Kolkata', asOf: '2026-10-01T10:00:00.000Z', branchId: null,
-  receivedCount: 3, handedOverCount: 2, stillOnBoardCount: 1,
+  receivedCount: 3, activeCount: 1, readyCount: 1, handedOverCount: 2, stillOnBoardCount: 1,
   collectedPaise: 79900, collectionByMethod: [{ method: 'CASH', amountPaise: 49900 }, { method: 'UPI', amountPaise: 30000 }],
   unpaidPaise: 29900, unpaidInvoiceCount: 1, pipelinePaise: 29900,
   avgTurnaroundMinutes: 105, lateCount: 2,

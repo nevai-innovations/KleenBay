@@ -26,6 +26,7 @@ import { createStorageProvider, LocalStorageProvider, type StorageProvider } fro
 import { createPaymentProvider, type PaymentProvider } from './payu.js';
 import { registerBillingRoutes } from './billing.js';
 import { registerInvoiceRoutes } from './invoices.js';
+import { registerBranchRoutes } from './branches.js';
 
 class RouteOnlyLogController extends LogController {
   constructor() { super({ disableRequestLogging: true }); }
@@ -117,10 +118,8 @@ export async function buildApp(config: Config, db: Db, otp: OtpProvider = create
     const input = employeeSchema.parse(request.body);
     const activeBranches = await db.branch.findMany({ where: { organizationId: owner.organizationId, active: true }, select: { id: true } });
     const branchId = input.branchId ?? (activeBranches.length === 1 ? activeBranches[0]?.id : undefined);
-    if (branchId) {
-      const branch = activeBranches.find((candidate) => candidate.id === branchId);
-      if (!branch) notFound();
-    }
+    if (!branchId) throw new HttpError(400, 'BRANCH_REQUIRED', 'Choose an active branch');
+    if (!activeBranches.some((candidate) => candidate.id === branchId)) notFound();
     const employee = await db.$transaction(async (tx) => {
       const created = await tx.user.create({ data: { organizationId: owner.organizationId, branchId, role: 'EMPLOYEE', name: input.name, active: input.active, employee: { create: { mobile: input.mobile } } } });
       await audit(tx, { organizationId: owner.organizationId, actorUserId: owner.id, action: 'EMPLOYEE_CREATED', entityType: 'User', entityId: created.id, after: { name: created.name, mobile: input.mobile, active: input.active }, ipAddress: request.ip });
@@ -143,15 +142,13 @@ export async function buildApp(config: Config, db: Db, otp: OtpProvider = create
       const result = await tx.user.update({ where: { id }, data: { name: input.name, active: input.active, branchId: input.branchId, employee: input.mobile ? { update: { mobile: input.mobile } } : undefined } });
       if (input.active === false) await tx.session.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
       await audit(tx, { organizationId: owner.organizationId, actorUserId: owner.id, action: 'EMPLOYEE_UPDATED', entityType: 'User', entityId: id, before: { name: existing.name, mobile: existing.employee?.mobile, active: existing.active, branchId: existing.branchId }, after: { name: result.name, mobile: input.mobile ?? existing.employee?.mobile, active: result.active, branchId: result.branchId }, ipAddress: request.ip });
+      if (existing.branchId !== result.branchId) await audit(tx, { organizationId: owner.organizationId, actorUserId: owner.id, action: 'EMPLOYEE_BRANCH_CHANGED', entityType: 'User', entityId: id, before: { branchId: existing.branchId }, after: { branchId: result.branchId }, ipAddress: request.ip });
       return result;
     });
     return { id: updated.id, name: updated.name, mobile: input.mobile ?? existing.employee?.mobile, active: updated.active, branchId: updated.branchId };
   });
 
-  app.get('/api/branches', async (request) => {
-    const user = await currentUser(db, request);
-    return db.branch.findMany({ where: { organizationId: user.organizationId, active: true }, select: { id: true, name: true, address: true, phone: true }, orderBy: { name: 'asc' } });
-  });
+  registerBranchRoutes(app, db);
 
   registerCatalogRoutes(app, db);
   registerOperationsRoutes(app, db, messaging, config);

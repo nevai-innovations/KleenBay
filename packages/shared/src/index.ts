@@ -63,11 +63,28 @@ export const ownerSetupSchema = z.object({
 export const employeeSchema = z.object({
   name: z.string().trim().min(2).max(120),
   mobile: indianMobileSchema,
-  branchId: z.string().optional(),
+  branchId: z.string().min(1).optional(),
   active: z.boolean().default(true),
 });
 
 export const employeeUpdateSchema = employeeSchema.partial();
+const branchFields = {
+  name: z.string().trim().min(2).max(120),
+  code: z.string().trim().max(32).regex(/^[A-Za-z0-9_-]*$/).optional(),
+  phone: z.string().trim().min(5).max(30),
+  email: z.union([z.email().max(254), z.literal('')]).optional(),
+  addressLine1: z.string().trim().min(3).max(200),
+  addressLine2: z.string().trim().max(200).optional(),
+  city: z.string().trim().min(2).max(100),
+  state: z.string().trim().min(2).max(100),
+  postalCode: z.string().trim().min(3).max(20),
+  country: z.string().trim().min(2).max(80),
+  timezone: z.string().trim().min(1).max(80).refine((value) => { try { new Intl.DateTimeFormat('en', { timeZone: value }); return true; } catch { return false; } }, 'Enter a valid timezone'),
+  openingTime: z.union([z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), z.literal('')]).optional(),
+  closingTime: z.union([z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), z.literal('')]).optional(),
+};
+export const branchCreateSchema = z.object(branchFields).strict();
+export const branchUpdateSchema = branchCreateSchema.partial();
 export const otpRequestSchema = z.object({ mobile: indianMobileSchema });
 export const otpVerifySchema = z.union([
   otpRequestSchema.extend({ code: z.string().regex(/^\d{6}$/) }),
@@ -126,6 +143,8 @@ export type DailySummary = {
   asOf: string;
   branchId: string | null;
   receivedCount: number;
+  activeCount: number;
+  readyCount: number;
   handedOverCount: number;
   stillOnBoardCount: number;
   collectedPaise: number;

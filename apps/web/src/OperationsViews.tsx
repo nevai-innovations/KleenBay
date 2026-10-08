@@ -36,7 +36,7 @@ function CheckInSheet({ session, branches, services, employees, onClose, onSaved
   session: Session; branches: Branch[]; services: Service[]; employees: AvailableEmployee[]; onClose: () => void; onSaved: (job: Job) => void;
 }) {
   const [idempotencyKey] = useState(() => crypto.randomUUID());
-  const [branchId, setBranchId] = useState(session.user.branchId ?? branches[0]?.id ?? '');
+  const [branchId, setBranchId] = useState(session.user.role === 'EMPLOYEE' ? session.user.branchId ?? '' : branches.filter((branch) => branch.active).length === 1 ? branches.find((branch) => branch.active)?.id ?? '' : '');
   const [mobile, setMobile] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [registrationNumber, setRegistrationNumber] = useState('');
@@ -54,7 +54,7 @@ function CheckInSheet({ session, branches, services, employees, onClose, onSaved
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const mobileDigits = mobile.replace(/\D/g, '').slice(-10);
-  const selectedBranchEmployees = employees.filter((employee) => !employee.branchId || employee.branchId === branchId);
+  const selectedBranchEmployees = employees.filter((employee) => employee.branchId === branchId);
 
   useEffect(() => {
     if (mobileDigits.length !== 10) return;
@@ -97,7 +97,7 @@ function CheckInSheet({ session, branches, services, employees, onClose, onSaved
   const mismatch = knownVehicle?.customer && mobileDigits.length === 10 && !knownVehicle.customer.mobile.endsWith(mobileDigits);
   return <Sheet title="Check-in Vehicle" onClose={onClose}>
     <form className="ops-form" onSubmit={(event) => void submit(event)}>
-      {branches.length > 1 && <label className="field"><span>Branch</span><select className="input" value={branchId} onChange={(event) => { setBranchId(event.target.value); setEmployeeIds([]); }} required>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>}
+      {session.user.role === 'OWNER' && branches.filter((branch) => branch.active).length > 1 && <label className="field"><span>Branch</span><select className="input" value={branchId} onChange={(event) => { setBranchId(event.target.value); setEmployeeIds([]); setServiceId(''); }} required><option value="">Choose branch</option>{branches.filter((branch) => branch.active).map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>}
       <div className="ops-form-grid"><label className="field"><span>Customer mobile number</span><input className="input" type="tel" inputMode="tel" autoComplete="tel" value={mobile} onChange={(event) => { setMobile(event.target.value); setCustomerName(''); setKnownCustomer(null); }} required /></label>
         <label className="field"><span>Customer name</span><input className="input" autoComplete="name" value={customerName} onChange={(event) => setCustomerName(event.target.value)} required /></label></div>
       {knownCustomer && <p className="ops-match"><Check size={16} /> Existing customer: {knownCustomer.name}</p>}
@@ -105,7 +105,7 @@ function CheckInSheet({ session, branches, services, employees, onClose, onSaved
         <label className="field"><span>Vehicle type</span><select className="input" value={vehicleType} onChange={(event) => setVehicleType(event.target.value)} required><option value="">Select type</option>{['HATCHBACK', 'SEDAN', 'SUV', 'MUV', 'TWO_WHEELER', 'COMMERCIAL', 'OTHER'].map((type) => <option key={type} value={type}>{type.replaceAll('_', ' ')}</option>)}</select></label></div>
       {knownVehicle && <p className={`ops-match${mismatch ? ' is-warning' : ''}`}>{mismatch ? `This vehicle belongs to ${knownVehicle.customer?.name}. Check the mobile number.` : `Existing vehicle found. ${pastVisits} previous ${pastVisits === 1 ? 'visit' : 'visits'}.`}</p>}
       <div className="ops-form-grid"><label className="field"><span>Make</span><input className="input" value={make} onChange={(event) => setMake(event.target.value)} required /></label><label className="field"><span>Model</span><input className="input" value={model} onChange={(event) => setModel(event.target.value)} required /></label></div>
-      <div className="ops-form-grid"><label className="field"><span>Wash service</span><select className="input" value={serviceId} onChange={(event) => setServiceId(event.target.value)} required><option value="">Select service</option>{services.filter((service) => service.active).map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
+      <div className="ops-form-grid"><label className="field"><span>Wash service</span><select className="input" value={serviceId} onChange={(event) => setServiceId(event.target.value)} required><option value="">Select service</option>{services.filter((service) => service.active && (session.user.role === 'EMPLOYEE' || !branchId || service.branches.every((availability) => availability.branchId !== branchId || availability.active))).map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
         <label className="field"><span>Expected completion</span><input className="input" type="datetime-local" value={expectedAt} onChange={(event) => setExpectedAt(event.target.value)} required /></label></div>
       <label className="field"><span>Notes (optional)</span><textarea className="input ops-textarea" value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} /></label>
       {session.user.role === 'OWNER' && selectedBranchEmployees.length > 0 && <fieldset className="ops-fieldset"><legend>Assign employees (optional)</legend><div className="ops-checks">{selectedBranchEmployees.map((employee) => <label key={employee.id}><input type="checkbox" checked={employeeIds.includes(employee.id)} onChange={(event) => setEmployeeIds(event.target.checked ? [...employeeIds, employee.id] : employeeIds.filter((id) => id !== employee.id))} />{employee.name}</label>)}</div></fieldset>}
@@ -284,7 +284,7 @@ export function BoardView({ session }: { session: Session }) {
     <div className="seg ops-stage-tabs" role="tablist" aria-label="Board stages">{activeStages.map((stage) => <button key={stage} role="tab" aria-selected={mobileStage === stage} style={{ '--stage': stageTone[stage] } as React.CSSProperties} onClick={() => setMobileStage(stage)}><b>{jobs.filter((job) => job.status === stage).length}</b>{stageLabels[stage as Stage]}</button>)}</div>
     {error && <p className="portal-error" role="alert">{error}</p>}
     <div className="columns ops-columns">{activeStages.map((stage) => <section key={stage} className={`col${dragOver === stage ? ' drop-ok over' : ''}${mobileStage === stage ? ' is-mobile-active' : ''}`} data-drop={stage} style={{ '--stage': stageTone[stage] } as React.CSSProperties} onDragOver={(event) => { const id = event.dataTransfer.types.includes('text/plain'); if (id && stage !== 'RECEIVED') { event.preventDefault(); setDragOver(stage); } }} onDragLeave={() => setDragOver(null)} onDrop={(event) => drop(event, stage)}><header className="col-head"><span className="dot" /><b>{stageLabels[stage as Stage]}</b><span className="n">{jobs.filter((job) => job.status === stage).length}</span></header>{jobs.filter((job) => job.status === stage).map((job) => <JobCard key={job.id} job={job} late={new Date(job.expectedAt).getTime() < now} busy={busyId === job.id} canHandover={capabilities.canHandover} onOpen={() => setDetailId(job.id)} onAdvance={() => void advance(job, stage === 'RECEIVED' ? 'WASHING' : 'READY')} onHandover={() => setHandoverId(job.id)} />)}{!jobs.some((job) => job.status === stage) && <div className="empty">No vehicles here</div>}</section>)}</div>
-    {checkInOpen && <CheckInSheet session={session} branches={branches} services={services} employees={employees} onClose={() => setCheckInOpen(false)} onSaved={() => { setCheckInOpen(false); setMobileStage('RECEIVED'); void load(); }} />}
+    {checkInOpen && <CheckInSheet session={session} branches={branches.filter((branch) => branch.active)} services={services} employees={employees} onClose={() => setCheckInOpen(false)} onSaved={() => { setCheckInOpen(false); setMobileStage('RECEIVED'); void load(); }} />}
     {detailId && <JobDetail jobId={detailId} role={session.user.role} onClose={() => setDetailId(null)} onChanged={() => void load()} />}
     {handoverId && <HandoverSheet jobId={handoverId} role={session.user.role} capabilities={capabilities} onClose={() => setHandoverId(null)} onSaved={() => { setHandoverId(null); void load(); }} />}
   </div>;

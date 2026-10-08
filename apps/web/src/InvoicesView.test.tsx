@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
+import { InvoicesView } from './InvoicesView';
 
 const owner = { user: { id: 'owner-1', role: 'OWNER', name: 'Owner', organizationId: 'org-1', branchId: null }, organization: { id: 'org-1', name: 'KleenBay' } };
 const employee = { user: { id: 'employee-1', role: 'EMPLOYEE', name: 'Worker', organizationId: 'org-1', branchId: null }, organization: { id: 'org-1', name: 'KleenBay' } };
@@ -18,6 +19,24 @@ const invoice = {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(null, '', '/'); });
 
 describe('owner customer invoices', () => {
+  it('uses the same branch filter for invoice and payment lists', async () => {
+    const requests: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      requests.push(path);
+      if (path === '/api/branches') return Response.json([{ id: 'main', name: 'Main', active: true }, { id: 'second', name: 'Kottiyam', active: true }]);
+      if (path === '/api/sale-items') return Response.json([]);
+      if (path === '/api/invoice-settings') return Response.json({ gstRateBps: null, gstin: null, invoiceAddress: null, invoicePhone: null, allowCustomInvoiceItems: false, employeeAddons: false });
+      if (path.startsWith('/api/invoices?')) return Response.json([]);
+      if (path.startsWith('/api/payments?')) return Response.json([]);
+      throw new Error(`Unexpected request ${path}`);
+    }));
+    const user = userEvent.setup();
+    render(<InvoicesView />);
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Invoice branch' }), 'second');
+    await waitFor(() => expect(requests.some((path) => path.includes('/api/invoices?branchId=second'))).toBe(true));
+    await user.click(screen.getByRole('button', { name: 'Payments' }));
+    await waitFor(() => expect(requests.some((path) => path.includes('/api/payments?branchId=second'))).toBe(true));
+  });
   it('shows invoice navigation, search, payment history and print document to owner', async () => {
     const requests: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (path: string) => {

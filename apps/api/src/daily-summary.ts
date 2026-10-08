@@ -43,8 +43,9 @@ export function registerDailySummaryRoutes(app: FastifyInstance, db: Db) {
     const { branchId } = dailySummaryQuerySchema.parse(request.query);
     if (branchId && !await db.branch.findFirst({ where: { id: branchId, organizationId: owner.organizationId } })) notFound();
     const organization = await db.organization.findUniqueOrThrow({ where: { id: owner.organizationId }, select: { timezone: true } });
+    const timeZone = branchId ? (await db.branch.findUniqueOrThrow({ where: { id: branchId }, select: { timezone: true } })).timezone : organization.timezone;
     const now = new Date();
-    const { date, start, end } = todayWindow(now, organization.timezone);
+    const { date, start, end } = todayWindow(now, timeZone);
     const scope = { organizationId: owner.organizationId, ...(branchId ? { branchId } : {}) };
     const invoiceBranch = branchId ? { job: { branchId } } : {};
     const paymentBranch = branchId ? { invoice: { job: { branchId } } } : {};
@@ -74,7 +75,7 @@ export function registerDailySummaryRoutes(app: FastifyInstance, db: Db) {
       const service = serviceTotals.get(job.serviceName) ?? { name: job.serviceName, count: 0, valuePaise: 0 };
       service.count++; service.valuePaise += job.totalPaise;
       serviceTotals.set(job.serviceName, service);
-      const hour = zonedParts(job.checkedInAt, organization.timezone).hour;
+      const hour = zonedParts(job.checkedInAt, timeZone).hour;
       hourTotals.set(hour, (hourTotals.get(hour) ?? 0) + 1);
     }
     const occupiedHours = [...hourTotals.keys()].sort((a, b) => a - b);
@@ -110,8 +111,9 @@ export function registerDailySummaryRoutes(app: FastifyInstance, db: Db) {
     const activeLate = active.filter((job) => job.expectedAt < now).length;
     const finishedLate = handedOver.filter((job) => (readyAt.get(job.id) ?? job.handedOverAt!) > job.expectedAt).length;
     return {
-      date, timeZone: organization.timezone, asOf: now.toISOString(), branchId: branchId ?? null,
+      date, timeZone, asOf: now.toISOString(), branchId: branchId ?? null,
       receivedCount: received.length, handedOverCount: handedOver.length,
+      activeCount: active.length, readyCount: active.filter((job) => job.status === 'READY').length,
       stillOnBoardCount: received.filter((job) => job.status !== 'HANDED_OVER').length,
       collectedPaise: payments.reduce((sum, payment) => sum + payment.amountPaise, 0),
       collectionByMethod: paymentMethods.map((method) => ({ method, amountPaise: methodTotals.get(method) ?? 0 })).filter((row) => row.amountPaise > 0),

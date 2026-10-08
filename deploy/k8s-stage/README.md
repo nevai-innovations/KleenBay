@@ -61,6 +61,17 @@ checkout or a feature branch.
    reconciles. If KleenBay fails, remove only KleenBay stage Ingress/workloads;
    do not roll back or edit unrelated services.
 
+For the branch-management release, inventory organizations, branches, job and
+employee branch assignments, and branch price overrides before applying the
+migration. The migration adds nullable address/contact fields without replacing
+existing branches or jobs and backfills a null employee branch only when the
+organization has exactly one branch. After rollout, run the stage-only
+`branch-smoke-job.yaml` with the tested API image digest. It creates one
+synthetic QA organization and verifies the public HTTPS owner/employee flow,
+branch pricing, filters, invoices/payments, and deactivation. It must never be
+run in production. Existing owners' passwords are not available to the job;
+their interactive login needs a separate human check.
+
 Stage uses one API replica and a gp3 persistent volume for photos. On 2026-10-02,
 the dedicated `KleenBayStageOTP` MSG91 widget, scoped `KBStageOTP` AuthKey,
 `kleenbay-stage-otp` Kubernetes secret, and OTP migration were configured.

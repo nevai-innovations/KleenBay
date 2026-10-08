@@ -34,6 +34,32 @@ function mockApi(provider: 'development' | 'dummy' | 'msg91' = 'development') {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(null, '', '/'); });
 
 describe('billing access', () => {
+  it('shows Branches only in the owner navigation and denies direct employee entry', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path.endsWith('/auth/me')) return Response.json(ownerSession);
+      if (path.endsWith('/employees') || path.endsWith('/branches')) return Response.json([]);
+      if (path.startsWith('/api/jobs?')) return Response.json([]);
+      if (path.startsWith('/api/board/metrics')) return Response.json({ inBay: 0, ready: 0, late: 0 });
+      if (path.endsWith('/services') || path.endsWith('/operations/available-employees')) return Response.json([]);
+      if (path.endsWith('/operations/capabilities')) return Response.json({ canHandover: true });
+      throw new Error(`Unexpected request ${path}`);
+    }));
+    const user = userEvent.setup();
+    render(<App />);
+    const nav = await screen.findByRole('navigation', { name: 'Owner navigation' });
+    await user.click(within(nav).getByRole('button', { name: 'Branches' }));
+    expect(window.location.pathname).toBe('/branches');
+    expect(await screen.findByRole('button', { name: 'Add Branch' })).toBeTruthy();
+    cleanup();
+    window.history.replaceState(null, '', '/branches');
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path.endsWith('/auth/me')) return Response.json(employeeSession);
+      throw new Error(`Unexpected employee request ${path}`);
+    }));
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: 'Access denied' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Add Branch' })).toBeNull();
+  });
   it('shows Billing only to owners and opens the owner billing page', async () => {
     const requests: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (path: string) => {

@@ -24,7 +24,7 @@ const listQuery = z.object({
 type User = Awaited<ReturnType<typeof currentUser>>;
 
 function jobScope(user: User): Prisma.JobWhereInput {
-  return { organizationId: user.organizationId, ...(user.role === 'EMPLOYEE' && user.branchId ? { branchId: user.branchId } : {}) };
+  return { organizationId: user.organizationId, ...(user.role === 'EMPLOYEE' ? { branchId: user.branchId ?? '__unassigned__' } : {}) };
 }
 
 async function getJob(db: Db, user: User, id: string) {
@@ -131,7 +131,8 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
   app.get('/api/operations/available-employees', async (request) => {
     const user = await requireOwner(db, request);
     const { branchId } = z.object({ branchId: z.string().optional() }).parse(request.query);
-    return db.user.findMany({ where: { organizationId: user.organizationId, role: 'EMPLOYEE', active: true, ...(branchId ? { OR: [{ branchId }, { branchId: null }] } : {}) }, select: { id: true, name: true, branchId: true }, orderBy: { name: 'asc' } });
+    if (branchId && !await db.branch.findFirst({ where: { id: branchId, organizationId: user.organizationId } })) notFound();
+    return db.user.findMany({ where: { organizationId: user.organizationId, role: 'EMPLOYEE', active: true, branchId: branchId ?? { not: null } }, select: { id: true, name: true, branchId: true }, orderBy: { name: 'asc' } });
   });
 
   app.get('/api/operations/settings', async (request) => {
@@ -153,7 +154,8 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
   app.get('/api/jobs', async (request) => {
     const user = await currentUser(db, request);
     const input = listQuery.parse(request.query);
-    if (input.branchId && user.role === 'EMPLOYEE' && user.branchId && input.branchId !== user.branchId) forbidden();
+    if (input.branchId && user.role === 'EMPLOYEE' && input.branchId !== user.branchId) forbidden();
+    if (input.branchId && user.role === 'OWNER' && !await db.branch.findFirst({ where: { id: input.branchId, organizationId: user.organizationId } })) notFound();
     const plate = input.q.toUpperCase().replace(/[^A-Z0-9]/g, '');
     const digits = input.q.replace(/\D/g, '');
     const start = input.date ? new Date(`${input.date}T00:00:00+05:30`) : null;
@@ -192,7 +194,8 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
   app.get('/api/board/metrics', async (request) => {
     const user = await currentUser(db, request);
     const { branchId, date } = z.object({ branchId: z.string().optional(), date: z.iso.date().optional() }).parse(request.query);
-    if (branchId && user.role === 'EMPLOYEE' && user.branchId && branchId !== user.branchId) forbidden();
+    if (branchId && user.role === 'EMPLOYEE' && branchId !== user.branchId) forbidden();
+    if (branchId && user.role === 'OWNER' && !await db.branch.findFirst({ where: { id: branchId, organizationId: user.organizationId } })) notFound();
     const scope = { ...jobScope(user), ...(branchId ? { branchId } : {}) };
     const [received, washing, ready, late] = await Promise.all([
       db.job.count({ where: { ...scope, status: 'RECEIVED' } }),
@@ -216,7 +219,7 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
     const activeBranches = await db.branch.findMany({ where: { organizationId: user.organizationId, active: true }, select: { id: true } });
     const branchId = input.branchId ?? user.branchId ?? (activeBranches.length === 1 ? activeBranches[0]?.id : undefined);
     if (!branchId || !activeBranches.some((branch) => branch.id === branchId)) badRequest('Choose an active branch');
-    if (user.role === 'EMPLOYEE' && user.branchId && user.branchId !== branchId) forbidden();
+    if (user.role === 'EMPLOYEE' && user.branchId !== branchId) forbidden();
     const expectedAt = new Date(input.expectedAt);
     if (expectedAt <= new Date()) badRequest('Expected completion must be in the future');
     const result = await db.$transaction(async (tx) => {
@@ -232,7 +235,7 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
       const priced = await resolveServicePrice(tx as Db, user.organizationId, input.serviceId, branchId, vehicle.type);
       const employeeIds = user.role === 'EMPLOYEE' ? [user.id] : [...new Set(input.employeeIds)];
       if (user.role === 'OWNER' && employeeIds.length) {
-        const employees = await tx.user.findMany({ where: { id: { in: employeeIds }, organizationId: user.organizationId, role: 'EMPLOYEE', active: true, OR: [{ branchId }, { branchId: null }] }, select: { id: true } });
+        const employees = await tx.user.findMany({ where: { id: { in: employeeIds }, organizationId: user.organizationId, role: 'EMPLOYEE', active: true, branchId }, select: { id: true } });
         if (employees.length !== employeeIds.length) badRequest('Choose active employees from this branch');
       }
       const org = await tx.organization.update({ where: { id: user.organizationId }, data: { nextJobNumber: { increment: 1 } }, select: { nextJobNumber: true, name: true } });

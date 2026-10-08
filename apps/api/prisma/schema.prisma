@@ -225,8 +225,19 @@ model Branch {
   id             String       @id @default(cuid())
   organizationId String
   name           String
+  code           String?
   address        String?
   phone          String?
+  email          String?
+  addressLine1   String?
+  addressLine2   String?
+  city           String?
+  state          String?
+  postalCode     String?
+  country        String       @default("IN")
+  timezone       String       @default("Asia/Kolkata")
+  openingTime    String?
+  closingTime    String?
   active         Boolean      @default(true)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -238,6 +249,7 @@ model Branch {
   messages       Message[]
 
   @@unique([organizationId, name])
+  @@unique([organizationId, code])
   @@unique([id, organizationId])
   @@index([organizationId, active])
 }

@@ -15,7 +15,7 @@ export function registerMediaRoutes(app: FastifyInstance, db: Db, storage: Stora
     const user = await currentUser(db, request);
     const { id } = jobParams.parse(request.params);
     const input = inspectionSchema.parse(request.body);
-    const job = await db.job.findFirst({ where: { id, organizationId: user.organizationId, ...(user.role === 'EMPLOYEE' && user.branchId ? { branchId: user.branchId } : {}) } });
+    const job = await db.job.findFirst({ where: { id, organizationId: user.organizationId, ...(user.role === 'EMPLOYEE' ? { branchId: user.branchId ?? '__unassigned__' } : {}) } });
     if (!job) notFound();
     if (job.status === 'HANDED_OVER') throw new HttpError(409, 'JOB_CLOSED', 'Condition records cannot be added after Handover');
     const existing = await db.vehicleInspection.findUnique({ where: { jobId: id } });
@@ -34,7 +34,7 @@ export function registerMediaRoutes(app: FastifyInstance, db: Db, storage: Stora
     const user = await currentUser(db, request);
     const { id } = jobParams.parse(request.params);
     const input = photoQuery.parse(request.query);
-    const job = await db.job.findFirst({ where: { id, organizationId: user.organizationId, ...(user.role === 'EMPLOYEE' && user.branchId ? { branchId: user.branchId } : {}) } });
+    const job = await db.job.findFirst({ where: { id, organizationId: user.organizationId, ...(user.role === 'EMPLOYEE' ? { branchId: user.branchId ?? '__unassigned__' } : {}) } });
     if (!job) notFound();
     if (job.status === 'HANDED_OVER') throw new HttpError(409, 'JOB_CLOSED', 'Photos cannot be added after Handover');
     if (input.damageItemId) {
@@ -63,7 +63,7 @@ export function registerMediaRoutes(app: FastifyInstance, db: Db, storage: Stora
   app.get('/api/photos/:id', async (request, reply) => {
     const user = await currentUser(db, request);
     const { id } = jobParams.parse(request.params);
-    const photo = await db.photo.findFirst({ where: { id, organizationId: user.organizationId, ...(user.role === 'EMPLOYEE' && user.branchId ? { job: { branchId: user.branchId } } : {}) } });
+    const photo = await db.photo.findFirst({ where: { id, organizationId: user.organizationId, ...(user.role === 'EMPLOYEE' ? { job: { branchId: user.branchId ?? '__unassigned__' } } : {}) } });
     if (!photo) notFound();
     return reply.header('Cache-Control', 'private, max-age=300').header('X-Content-Type-Options', 'nosniff').type(photo.mimeType).send(await storage.get(photo.storageKey));
   });

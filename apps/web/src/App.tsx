@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { ArrowLeft, CarFront, ChartNoAxesColumn, Columns3, ContactRound, CreditCard, History, Pencil, Settings2, Sparkles, Users } from 'lucide-react';
+import { ArrowLeft, CarFront, ChartNoAxesColumn, Columns3, ContactRound, CreditCard, History, MapPin, Pencil, Settings2, Sparkles, Users } from 'lucide-react';
 import { api, patch, post, type Branch, type Employee, type Session } from './api';
 import { CustomersView, ServicesView, VehiclesView } from './CatalogViews';
 import { BoardView, HistoryView, OperationsSettingsView } from './OperationsViews';
@@ -9,6 +9,7 @@ import { WhatsAppSettingsView } from './WhatsAppSettingsView';
 import { TrackingView } from './TrackingView';
 import { BillingView } from './BillingView';
 import { InvoicesView } from './InvoicesView';
+import { BranchesView } from './BranchesView';
 import { isLegalPath, LegalView } from './LegalView';
 import { captchaId, initializeWidget, sendWidgetOtp, verifyWidgetOtp, type Msg91WidgetConfig } from './msg91-otp';
 
@@ -143,9 +144,9 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   </div>;
 }
 
-type OwnerSection = 'board' | 'summary' | 'history' | 'employees' | 'customers' | 'vehicles' | 'services' | 'invoices' | 'billing' | 'settings';
+type OwnerSection = 'board' | 'summary' | 'history' | 'employees' | 'customers' | 'vehicles' | 'services' | 'branches' | 'invoices' | 'billing' | 'settings';
 function OwnerPortal({ session, onLogout }: { session: Session; onLogout: () => void }) {
-  const [section, setSection] = useState<OwnerSection>(() => window.location.pathname.startsWith('/invoices') ? 'invoices' : window.location.pathname === '/billing' ? 'billing' : 'board');
+  const [section, setSection] = useState<OwnerSection>(() => window.location.pathname.startsWith('/invoices') ? 'invoices' : window.location.pathname === '/billing' ? 'billing' : window.location.pathname === '/branches' ? 'branches' : 'board');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [name, setName] = useState('');
@@ -178,15 +179,22 @@ function OwnerPortal({ session, onLogout }: { session: Session; onLogout: () => 
     try { await patch(`/employees/${employee.id}`, { active: !employee.active }); await refresh(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not update employee'); }
   }
+  async function assignBranch(employee: Employee, nextBranchId: string) {
+    if (!nextBranchId || nextBranchId === employee.branchId) return;
+    setError('');
+    try { await patch(`/employees/${employee.id}`, { branchId: nextBranchId }); await refresh(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not assign branch'); }
+  }
 
   useEffect(() => {
-    const onPopState = () => setSection(window.location.pathname.startsWith('/invoices') ? 'invoices' : window.location.pathname === '/billing' ? 'billing' : 'board');
+    const onPopState = () => setSection(window.location.pathname.startsWith('/invoices') ? 'invoices' : window.location.pathname === '/billing' ? 'billing' : window.location.pathname === '/branches' ? 'branches' : 'board');
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
   function navigate(next: OwnerSection) {
     setSection(next);
-    window.history.pushState(null, '', next === 'billing' ? '/billing' : next === 'invoices' ? '/invoices' : '/');
+    window.history.pushState(null, '', next === 'billing' ? '/billing' : next === 'invoices' ? '/invoices' : next === 'branches' ? '/branches' : '/');
+    if (next === 'employees') void refresh().catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not load employees'));
   }
 
   const navigation = [
@@ -197,6 +205,7 @@ function OwnerPortal({ session, onLogout }: { session: Session; onLogout: () => 
     { id: 'customers' as const, label: 'Customers', icon: ContactRound },
     { id: 'vehicles' as const, label: 'Vehicles', icon: CarFront },
     { id: 'services' as const, label: 'Services', icon: Sparkles },
+    { id: 'branches' as const, label: 'Branches', icon: MapPin },
     { id: 'invoices' as const, label: 'Invoices', icon: CreditCard },
     { id: 'billing' as const, label: 'Billing', icon: CreditCard },
     { id: 'settings' as const, label: 'Settings', icon: Settings2 },
@@ -210,15 +219,16 @@ function OwnerPortal({ session, onLogout }: { session: Session; onLogout: () => 
     case 'customers': content = <CustomersView />; break;
     case 'vehicles': content = <VehiclesView />; break;
     case 'services': content = <ServicesView />; break;
+    case 'branches': content = <BranchesView />; break;
     case 'invoices': content = <InvoicesView />; break;
     case 'billing': content = <BillingView />; break;
     case 'settings': content = <OwnerSettings />; break;
     case 'employees': content = <>
       <div className="section-head"><div><h2>Team</h2><p>Manage who can sign in and work on vehicles.</p></div><span className="count-chip">{employees.filter((employee) => employee.active).length} active</span></div>
       <div className="team-layout"><section className="panel team-list" aria-label="Employees"><div className="team-list-head"><strong>Employees</strong><span>{employees.length}</span></div>
-        {employees.length === 0 ? <div className="team-empty">No employees yet.</div> : employees.map((employee) => <div className="team-row" key={employee.id}><span className="who-dot">{employee.name.slice(0, 1)}</span><div className="team-person"><strong>{employee.name}</strong><small>{employee.mobile}{employee.branchName ? ` · ${employee.branchName}` : ''}</small></div><span className={`status-pill ${employee.active ? 'is-active' : ''}`}>{employee.active ? 'Active' : 'Inactive'}</span><button className="btn small" onClick={() => void toggle(employee)}>{employee.active ? 'Deactivate' : 'Activate'}</button></div>)}</section>
+        {employees.length === 0 ? <div className="team-empty">No employees yet.</div> : employees.map((employee) => <div className="team-row" key={employee.id}><span className="who-dot">{employee.name.slice(0, 1)}</span><div className="team-person"><strong>{employee.name}</strong><small>{employee.mobile}</small></div><label className="field team-branch"><span>Branch</span><select className="input" aria-label={`${employee.name} branch`} value={employee.branchId ?? ''} onChange={(event) => void assignBranch(employee, event.target.value)}><option value="" disabled>Choose branch</option>{branches.filter((branch) => branch.active || branch.id === employee.branchId).map((branch) => <option key={branch.id} value={branch.id}>{branch.name}{branch.active ? '' : ' (inactive)'}</option>)}</select></label><span className={`status-pill ${employee.active ? 'is-active' : ''}`}>{employee.active ? 'Active' : 'Inactive'}</span><button className="btn small" onClick={() => void toggle(employee)}>{employee.active ? 'Deactivate' : 'Activate'}</button></div>)}</section>
         <form className="panel add-form" onSubmit={addEmployee}><h3>Add Employee</h3><Field label="Employee name" value={name} onChange={(event) => setName(event.target.value)} required /><Field label="Mobile number" type="tel" inputMode="tel" value={mobile} onChange={(event) => setMobile(event.target.value)} required />
-          {branches.length > 1 && <label className="field"><span>Branch</span><select className="input" value={branchId} onChange={(event) => setBranchId(event.target.value)}><option value="">All branches</option>{branches.map((branch) => <option value={branch.id} key={branch.id}>{branch.name}</option>)}</select></label>}
+          {branches.filter((branch) => branch.active).length > 1 && <label className="field"><span>Branch</span><select className="input" value={branchId} onChange={(event) => setBranchId(event.target.value)} required><option value="">Choose branch</option>{branches.filter((branch) => branch.active).map((branch) => <option value={branch.id} key={branch.id}>{branch.name}</option>)}</select></label>}
           <button className="btn primary block" disabled={busy}>Add employee</button></form></div>
       {error && <div className="portal-error" role="alert">{error}</div>}
     </>; break;
@@ -268,6 +278,6 @@ export default function App() {
   if (loading) return <div className="loading-screen">KleenBay</div>;
   if (setupToken) return <OwnerSetupView token={setupToken} onComplete={() => { window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`); setSetupToken(null); }} />;
   if (!session) return <Login onLogin={setSession} />;
-  if ((window.location.pathname === '/billing' || window.location.pathname.startsWith('/invoices')) && session.user.role !== 'OWNER') return <main className="login-page"><div className="login-box"><h1>Access denied</h1><p>Owner access required.</p><button className="btn" onClick={() => { window.history.replaceState(null, '', '/'); window.location.reload(); }}>Back to board</button></div></main>;
+  if ((window.location.pathname === '/billing' || window.location.pathname === '/branches' || window.location.pathname.startsWith('/invoices')) && session.user.role !== 'OWNER') return <main className="login-page"><div className="login-box"><h1>Access denied</h1><p>Owner access required.</p><button className="btn" onClick={() => { window.history.replaceState(null, '', '/'); window.location.reload(); }}>Back to board</button></div></main>;
   return <>{session.user.role === 'OWNER' ? <OwnerPortal session={session} onLogout={() => void logout()} /> : <EmployeePortal session={session} onLogout={() => void logout()} />}{logoutError && <div className="global-error" role="alert">{logoutError}</div>}</>;
 }

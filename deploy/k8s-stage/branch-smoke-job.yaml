@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: kleenbay-stage-branch-smoke-
+  namespace: kleenbay-stage
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: smoke
+          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-api@sha256:74216acaac9fb476b4cace579990fe6eb2f339e31cccfd6eb05e20a3a08bd034
+          command: [node, apps/api/dist/scripts/stage-branch-smoke.js]
+          envFrom:
+            - configMapRef:
+                name: kleenbay-stage-config
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: kleenbay-stage-migrator-db
+                  key: DATABASE_URL
+            - name: OTP_HASH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: kleenbay-stage-otp
+                  key: OTP_HASH_SECRET
