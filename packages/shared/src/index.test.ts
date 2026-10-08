@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canMoveStage, normalizeIndianMobile, normalizeRegistration, servicePriceSchema } from './index.js';
+import { canMoveStage, checkInSchema, normalizeIndianMobile, normalizeRegistration, servicePriceSchema, vehicleSchema } from './index.js';
 
 describe('shared business rules', () => {
   it('normalizes Indian mobiles and rejects invalid numbers', () => {
@@ -14,6 +14,13 @@ describe('shared business rules', () => {
     expect(normalizeRegistration('kl 07 ab 1234')).toBe('KL07AB1234');
     expect(normalizeRegistration('22 bh 1234 aa')).toBe('22BH1234AA');
     expect(() => normalizeRegistration('invalid plate')).toThrow();
+  });
+
+  it('reports invalid registration numbers through schemas without throwing', () => {
+    const vehicle = vehicleSchema.safeParse({ customerId: 'customer', registrationNumber: 'invalid plate', make: 'Tata', model: 'Nexon', type: 'SUV' });
+    const checkIn = checkInSchema.safeParse({ idempotencyKey: 'c2b69f76-6e6b-4aa4-917d-c928906ec1a0', mobile: '9845612399', customerName: 'Test Driver', registrationNumber: 'invalid plate', make: 'Tata', model: 'Nexon', vehicleType: 'SUV', serviceId: 'service', expectedAt: '2026-10-08T16:00:00+05:30' });
+    expect(vehicle.error?.issues).toEqual(expect.arrayContaining([expect.objectContaining({ path: ['registrationNumber'], message: 'Enter a valid Indian registration number' })]));
+    expect(checkIn.error?.issues).toEqual(expect.arrayContaining([expect.objectContaining({ path: ['registrationNumber'], message: 'Enter a valid Indian registration number' })]));
   });
 
   it('allows only the next workflow stage', () => {

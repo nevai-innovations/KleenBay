@@ -93,6 +93,14 @@ beforeAll(async () => {
 afterAll(async () => { if (app) await app.close(); await db.$disconnect(); });
 
 describe('vehicle operations', () => {
+  it('rejects an invalid registration at check-in without creating a job', async () => {
+    const before = await db.job.count({ where: { organizationId } });
+    const response = await request('POST', '/api/jobs/check-in', checkIn('invalid plate'), ownerCookie);
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toMatchObject({ code: 'VALIDATION_ERROR', issues: [{ path: 'registrationNumber', message: 'Enter a valid Indian registration number' }] });
+    expect(await db.job.count({ where: { organizationId } })).toBe(before);
+  });
+
   it('runs owner check-in through handover with once-only events, payment and history', async () => {
     const input = checkIn('KL29AB1234');
     const created = await request('POST', '/api/jobs/check-in', input, ownerCookie);

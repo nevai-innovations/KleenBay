@@ -76,6 +76,14 @@ describe('M2 catalog and tenant boundaries', () => {
     expect((await request('POST', '/api/vehicles', { ...payload, customerId: other.json().id }, ownerCookie)).statusCode).toBe(409);
   });
 
+  it('rejects an invalid registration as a validation error without creating a vehicle', async () => {
+    const before = await db.vehicle.count({ where: { organizationId } });
+    const response = await request('POST', '/api/vehicles', { customerId, registrationNumber: 'invalid plate', make: 'Tata', model: 'Nexon', type: 'SUV' }, ownerCookie);
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toMatchObject({ code: 'VALIDATION_ERROR', issues: [{ path: 'registrationNumber', message: 'Enter a valid Indian registration number' }] });
+    expect(await db.vehicle.count({ where: { organizationId } })).toBe(before);
+  });
+
   it('scopes customer and vehicle access to the organization', async () => {
     const foreignOrg = await db.organization.create({ data: { slug: `foreign-${randomUUID()}`, name: 'Foreign Wash' } });
     const foreignCustomer = await db.customer.create({ data: { organizationId: foreignOrg.id, name: 'Foreign', mobile: '+919845612305' } });

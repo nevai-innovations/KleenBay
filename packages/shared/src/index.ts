@@ -42,6 +42,14 @@ export function normalizeRegistration(input: string): string {
   return value;
 }
 
+const registrationSchema = z.string().transform((value, context) => {
+  try { return normalizeRegistration(value); }
+  catch {
+    context.addIssue({ code: 'custom', message: 'Enter a valid Indian registration number' });
+    return z.NEVER;
+  }
+});
+
 export const ownerLoginSchema = z.object({
   login: z.string().trim().min(3).max(254),
   password: z.string().min(1).max(1024),
@@ -82,7 +90,7 @@ export const customerUpdateSchema = customerSchema.partial();
 
 export const vehicleSchema = z.object({
   customerId: z.string().min(1),
-  registrationNumber: z.string().transform(normalizeRegistration),
+  registrationNumber: registrationSchema,
   make: z.string().trim().min(1).max(80),
   model: z.string().trim().min(1).max(80),
   variant: z.string().trim().max(80).optional(),
@@ -141,7 +149,7 @@ export const checkInSchema = z.object({
   idempotencyKey: z.uuid(),
   mobile: mobileSchema,
   customerName: z.string().trim().min(2).max(120),
-  registrationNumber: z.string().transform(normalizeRegistration),
+  registrationNumber: registrationSchema,
   make: z.string().trim().min(1).max(80),
   model: z.string().trim().min(1).max(80),
   vehicleType: z.enum(vehicleTypes),
