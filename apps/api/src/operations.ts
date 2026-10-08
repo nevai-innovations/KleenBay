@@ -178,6 +178,7 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
     if (user.role === 'OWNER') return jobs.map(({ trackingTokenHash: _hash, trackingTokenCiphertext: _ciphertext, ...job }) => job);
     return jobs.map((job) => ({
       id: job.id,
+      branchId: job.branchId,
       number: job.number,
       status: job.status,
       serviceName: job.serviceName,

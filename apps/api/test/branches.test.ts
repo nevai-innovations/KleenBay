@@ -112,6 +112,9 @@ describe('owner branch management and scope', () => {
     expect(filtered.every((job: { branchId: string }) => job.branchId === mainId)).toBe(true);
     expect((await request('GET', `/api/summary/daily?branchId=${mainId}`, undefined, ownerCookie)).json().branchId).toBe(mainId);
     expect((await request('GET', `/api/jobs/${second.json().id}`, undefined, employeeCookie)).statusCode).toBe(404);
+    const employeeJobs = (await request('GET', '/api/jobs', undefined, employeeCookie)).json();
+    expect(employeeJobs.some((job: { id: string }) => job.id === first.json().id)).toBe(true);
+    expect(employeeJobs.every((job: { branchId: string }) => job.branchId === mainId)).toBe(true);
   });
 
   it('scopes invoices, payments, and handed-over history to the job branch', async () => {

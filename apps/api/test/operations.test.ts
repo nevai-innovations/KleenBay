@@ -166,7 +166,7 @@ describe('vehicle operations', () => {
     expectOperationalOnly(board.json());
     const boardJob = board.json().find((job: { id: string }) => job.id === id);
     expect(boardJob).toBeTruthy();
-    expect(Object.keys(boardJob).sort()).toEqual(['id', 'number', 'status', 'serviceName', 'checkedInAt', 'stageAt', 'expectedAt', 'handedOverAt', 'branch', 'customer', 'vehicle'].sort());
+    expect(Object.keys(boardJob).sort()).toEqual(['id', 'branchId', 'number', 'status', 'serviceName', 'checkedInAt', 'stageAt', 'expectedAt', 'handedOverAt', 'branch', 'customer', 'vehicle'].sort());
     expectOperationalOnly((await request('GET', '/api/board/metrics', undefined, employeeCookie)).json());
     expectOperationalOnly((await request('GET', '/api/operations/capabilities', undefined, employeeCookie)).json());
     expect((await request('GET', '/api/operations/settings', undefined, employeeCookie)).statusCode).toBe(403);
