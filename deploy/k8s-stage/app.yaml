@@ -27,7 +27,7 @@ spec:
       labels:
         app: kleenbay-stage-api
       annotations:
-        kleenbay.com/source-revision: 62e9fa74e15416b6f8d5d7a6b3960844bb8a9398
+        kleenbay.com/source-revision: ef48db25a275f2e2e9655a2b3da09a2af80eed7c
     spec:
       automountServiceAccountToken: false
       securityContext:
@@ -36,7 +36,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: api
-          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-api@sha256:728da6e6f6bb8066508e56e133242a3b7a5bd81a5d1f361fe8b3b63f43f30d9e
+          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-api@sha256:4164ca7b7afd19f228321f0e1e63a93d06aadfc0423fa6aa676839fdf42e9bce
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
