@@ -367,7 +367,7 @@ describe('vehicle operations', () => {
   });
 
   it('sends a previously failed tenant MSG91 message through its scoped sender and keeps attempt history', async () => {
-    await db.organizationWhatsAppConfig.update({ where: { organizationId }, data: { provider: 'MSG91', status: 'CONNECTED', credentialRef: 'primary', msg91IntegratedNumberId: 'integrated-test', senderNumber: '+919999999999' } });
+    await db.organizationWhatsAppConfig.update({ where: { organizationId }, data: { provider: 'MSG91', status: 'CONNECTED', credentialRef: 'primary', msg91IntegratedNumberId: 'integrated-test', senderNumber: '+919999999999', templateStatuses: { received_test: 'APPROVED' } } });
     try {
       const created = await request('POST', '/api/jobs/check-in', checkIn('KL29AB1299'), ownerCookie);
       expect(created.statusCode).toBe(201);

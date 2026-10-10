@@ -47,6 +47,9 @@ spec:
                 name: kleenbay-stage-config
             - secretRef:
                 name: kleenbay-stage-razorpay
+            - secretRef:
+                name: kleenbay-stage-whatsapp
+                optional: true
           env:
             - name: POD_NAMESPACE
               valueFrom:

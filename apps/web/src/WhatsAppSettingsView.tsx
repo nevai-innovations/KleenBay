@@ -40,8 +40,8 @@ export function WhatsAppSettingsView() {
 
   async function testConnection() {
     setBusy(true); setError(''); setResult('');
-    try { const response = await post<{ message: string }>('/whatsapp/test-connection', {}); setResult(response.message); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Connection test failed'); }
+    try { const response = await post<{ message: string }>('/whatsapp/test-connection', {}); setResult(response.message); const updated = await api<WhatsAppSettings>('/whatsapp/settings'); setSettings(updated); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Connection test failed'); const updated = await api<WhatsAppSettings>('/whatsapp/settings').catch(() => null); if (updated) setSettings(updated); }
     finally { setBusy(false); }
   }
 
@@ -50,10 +50,11 @@ export function WhatsAppSettingsView() {
     {!draft ? <p className="ops-loading">Loading settings...</p> : <>
       <p className="wa-provider-state"><strong>{settings?.provider}</strong> · {settings?.status.replaceAll('_', ' ')}</p>
       {settings?.provider === 'MOCK' && <p className="wa-mock-note">Mock provider active — no real WhatsApp messages are being sent.</p>}
+      {settings?.provider === 'MSG91' && <dl>{fields.map(({ key, label }) => <div key={key}><dt>{label}</dt><dd>{settings[key] ? `${settings[key]}: ${(settings.templateStatuses?.[settings[key]!] ?? 'NOT_VERIFIED').replaceAll('_', ' ')}` : 'Not configured'}</dd></div>)}</dl>}
       <form onSubmit={(event) => void save(event)} className="wa-settings-form">
         <label className="ops-setting-row"><span>Automatic customer updates</span><input type="checkbox" checked={draft.enabled} disabled={busy} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /></label>
         <div className="wa-settings-fields">
-          <label className="field"><span>Connected sender number</span><input className="input" type="tel" inputMode="tel" placeholder="Not connected" value={draft.senderNumber ?? ''} disabled={busy} onChange={(event) => setDraft({ ...draft, senderNumber: event.target.value })} /></label>
+          <label className="field"><span>Connected sender number</span><input className="input" type="tel" inputMode="tel" placeholder="Not connected" value={draft.senderNumber ?? ''} disabled={busy || settings?.provider === 'MSG91'} onChange={(event) => setDraft({ ...draft, senderNumber: event.target.value })} /></label>
           <label className="field"><span>Sender display name</span><input className="input" value={draft.senderDisplayName ?? ''} disabled={busy} onChange={(event) => setDraft({ ...draft, senderDisplayName: event.target.value })} /></label>
         </div>
         <h3>Message templates</h3>

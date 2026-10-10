@@ -6,6 +6,7 @@ import type { Config } from './config.js';
 import { audit } from './audit.js';
 import { requireOwner } from './auth.js';
 import { HttpError } from './errors.js';
+import type { MessagingProvider } from './messaging.js';
 
 const template = z.string().trim().min(1).max(120).regex(/^[A-Za-z0-9_-]+$/);
 const patchSchema = z.object({
@@ -30,6 +31,7 @@ const defaults = {
   templateHandedOver: 'VEHICLE_HANDED_OVER',
   status: 'MOCK_ACTIVE' as const,
   lastVerifiedAt: null,
+  templateStatuses: {},
 };
 
 function safeConfig(record: Awaited<ReturnType<Db['organizationWhatsAppConfig']['findUnique']>>, provider: 'mock' | 'msg91' = 'mock') {
@@ -38,7 +40,7 @@ function safeConfig(record: Awaited<ReturnType<Db['organizationWhatsAppConfig'][
   return safe;
 }
 
-export function registerWhatsAppSettingsRoutes(app: FastifyInstance, db: Db, config: Config) {
+export function registerWhatsAppSettingsRoutes(app: FastifyInstance, db: Db, config: Config, messaging: MessagingProvider) {
   app.get('/api/whatsapp/settings', async (request) => {
     const owner = await requireOwner(db, request);
     return safeConfig(await db.organizationWhatsAppConfig.findUnique({ where: { organizationId: owner.organizationId } }), config.MESSAGING_PROVIDER);
@@ -49,18 +51,39 @@ export function registerWhatsAppSettingsRoutes(app: FastifyInstance, db: Db, con
     const input = patchSchema.parse(request.body);
     return db.$transaction(async (tx) => {
       const before = await tx.organizationWhatsAppConfig.findUnique({ where: { organizationId: owner.organizationId } });
-      if (config.MESSAGING_PROVIDER === 'msg91' && (!before || before.provider !== 'MSG91')) throw new HttpError(409, 'PROVIDER_MANAGED', 'MSG91 sender must be provisioned by the platform');
-      if (before?.provider === 'MSG91' && (config.MESSAGING_PROVIDER !== 'msg91' || Object.keys(input).some((key) => key !== 'enabled'))) throw new HttpError(409, 'PROVIDER_MANAGED', 'MSG91 sender and templates are platform-managed');
-      const updated = await tx.organizationWhatsAppConfig.upsert({ where: { organizationId: owner.organizationId }, create: { organizationId: owner.organizationId, ...input }, update: input });
+      if (before?.provider === 'MSG91' && !config.whatsAppKeys[`${owner.organizationId}:${before.credentialRef}`]) throw new HttpError(409, 'PROVIDER_MANAGED', 'MSG91 credentials must be provisioned by the platform');
+      const senderChanged = before?.provider === 'MSG91' && input.senderNumber !== undefined && input.senderNumber !== before.senderNumber;
+      if (senderChanged) throw new HttpError(409, 'PROVIDER_MANAGED', 'Changing the connected sender requires platform provisioning');
+      const templatesChanged = before?.provider === 'MSG91' && ['templateReceived', 'templateWashing', 'templateReady', 'templateHandedOver'].some((key) => key in input && input[key as keyof typeof input] !== before[key as keyof typeof before]);
+      const updated = await tx.organizationWhatsAppConfig.upsert({ where: { organizationId: owner.organizationId }, create: { organizationId: owner.organizationId, ...input }, update: { ...input, ...(templatesChanged ? { templateStatuses: {}, lastVerifiedAt: null, status: 'NOT_CONNECTED' as const } : {}) } });
       await audit(tx, { organizationId: owner.organizationId, actorUserId: owner.id, action: 'WHATSAPP_SETTINGS_UPDATED', entityType: 'OrganizationWhatsAppConfig', entityId: owner.organizationId, before: safeConfig(before), after: safeConfig(updated), ipAddress: request.ip });
       return safeConfig(updated);
     });
   });
 
-  app.post('/api/whatsapp/test-connection', async (request) => {
+  app.post('/api/whatsapp/test-connection', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (request) => {
     const owner = await requireOwner(db, request);
     const settings = await db.organizationWhatsAppConfig.findUnique({ where: { organizationId: owner.organizationId } });
-    if (settings?.provider === 'MSG91') throw new HttpError(409, 'PROVIDER_NOT_READY', 'MSG91 WhatsApp onboarding is not complete');
+    if (settings?.provider === 'MSG91') {
+      const provider = messaging.forProvider?.('MSG91') ?? messaging;
+      if (provider.name !== 'MSG91' || !provider.checkConnection) throw new HttpError(409, 'PROVIDER_NOT_READY', 'MSG91 connectivity is not configured');
+      let result: { templateStatuses: Record<string, string> };
+      try {
+        result = await provider.checkConnection({ organizationId: owner.organizationId, credentialRef: settings.credentialRef, integratedNumberId: settings.msg91IntegratedNumberId, senderNumber: settings.senderNumber, templates: [settings.templateReceived, settings.templateWashing, settings.templateReady, ...(settings.templateHandedOver ? [settings.templateHandedOver] : [])] });
+      } catch {
+        await db.$transaction(async (tx) => {
+          await tx.organizationWhatsAppConfig.updateMany({ where: { organizationId: owner.organizationId, updatedAt: settings.updatedAt }, data: { status: 'ERROR', lastVerifiedAt: null, templateStatuses: {} } });
+          await audit(tx, { organizationId: owner.organizationId, actorUserId: owner.id, action: 'WHATSAPP_CONNECTION_FAILED', entityType: 'OrganizationWhatsAppConfig', entityId: owner.organizationId, ipAddress: request.ip });
+        });
+        throw new HttpError(502, 'PROVIDER_CONNECTION_FAILED', 'Connection failed: verify sender credentials and provider access');
+      }
+      await db.$transaction(async (tx) => {
+        const updated = await tx.organizationWhatsAppConfig.updateMany({ where: { organizationId: owner.organizationId, updatedAt: settings.updatedAt }, data: { status: 'CONNECTED', lastVerifiedAt: new Date(), templateStatuses: result.templateStatuses } });
+        if (!updated.count) throw new HttpError(409, 'CONFIG_CHANGED', 'Settings changed during verification. Test connection again.');
+        await audit(tx, { organizationId: owner.organizationId, actorUserId: owner.id, action: 'WHATSAPP_CONNECTION_VERIFIED', entityType: 'OrganizationWhatsAppConfig', entityId: owner.organizationId, after: { provider: 'MSG91', templateStatuses: result.templateStatuses }, ipAddress: request.ip });
+      });
+      return { status: 'CONNECTED', delivered: false, message: 'Connected. No customer message was sent.', templateStatuses: result.templateStatuses };
+    }
     await audit(db, { organizationId: owner.organizationId, actorUserId: owner.id, action: 'WHATSAPP_MOCK_CONNECTION_TESTED', entityType: 'OrganizationWhatsAppConfig', entityId: owner.organizationId, ipAddress: request.ip });
     return { status: 'MOCK_ACTIVE', delivered: false, message: 'Mock provider active - no real WhatsApp messages are being sent.' };
   });

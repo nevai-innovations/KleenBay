@@ -160,7 +160,7 @@ export async function buildApp(config: Config, db: Db, otp: OtpProvider = create
 
   registerCatalogRoutes(app, db);
   registerOperationsRoutes(app, db, messaging, config);
-  registerWhatsAppSettingsRoutes(app, db, config);
+  registerWhatsAppSettingsRoutes(app, db, config, messaging);
   registerMediaRoutes(app, db, storage);
   registerPublicTrackingRoutes(app, db, storage, config);
   registerDailySummaryRoutes(app, db);

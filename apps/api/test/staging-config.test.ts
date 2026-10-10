@@ -85,7 +85,7 @@ describe('public staging safeguards', () => {
       createOtpProvider(getConfig()).verifyAccessToken('a'.repeat(32)),
     ).rejects.toMatchObject({ statusCode: 503, code: 'OTP_UNAVAILABLE' });
     const provider = createMessagingProvider(getConfig());
-    expect(provider).toBeInstanceOf(MockMessagingProvider);
+    expect(provider.forProvider!('MOCK')).toBeInstanceOf(MockMessagingProvider);
     expect(provider.name).toBe('MOCK');
     expect(await provider.send({ recipient: '+919876543210', text: 'test', templateKey: 'VEHICLE_RECEIVED', idempotencyKey: 'test' })).toEqual({ providerMessageId: 'mock:test' });
   });

@@ -136,7 +136,7 @@ describe('authoritative organization enforcement', () => {
     await db.job.update({ where: { id: old.id }, data: { checkedInAt: new Date(end.getTime() - 1) } });
     await db.job.update({ where: { id: boundary.id }, data: { checkedInAt: end } });
     const uploader = await db.user.findFirstOrThrow({ where: { organizationId: orgId, role: 'OWNER' } });
-    const hiddenPhoto = await db.photo.create({ data: { organizationId: orgId, jobId: boundary.id, kind: 'BEFORE', storageKey: 'synthetic/ineligible.png', mimeType: 'image/png', byteSize: 1, uploadedById: uploader.id } });
+    const hiddenPhoto = await db.photo.create({ data: { organizationId: orgId, jobId: boundary.id, kind: 'BEFORE', storageKey: `synthetic/${boundary.id}/ineligible.png`, mimeType: 'image/png', byteSize: 1, uploadedById: uploader.id } });
     expect((await req('GET', `/api/photos/${hiddenPhoto.id}`, undefined, employeeCookie)).statusCode).toBe(402);
     const list = (await req('GET', '/api/jobs', undefined, employeeCookie)).json();
     expect(list.map((job: { id: string }) => job.id)).toEqual([old.id]);

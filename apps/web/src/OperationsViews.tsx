@@ -13,7 +13,7 @@ const dateTime = (value: string) => new Intl.DateTimeFormat('en-IN', { dateStyle
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : 'Request failed';
 const plateKey = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, '');
 const messageLabel = (event: string) => ({ VEHICLE_RECEIVED: 'Vehicle received message', WASH_STARTED: 'Wash started message', VEHICLE_READY: 'Ready for pickup message', VEHICLE_HANDED_OVER: 'Handover message' })[event as 'VEHICLE_RECEIVED' | 'WASH_STARTED' | 'VEHICLE_READY' | 'VEHICLE_HANDED_OVER'] ?? event.replaceAll('_', ' ');
-const messageStatus = (message: NonNullable<Job['messages']>[number]) => message.status === 'SENT' ? message.provider === 'MOCK' ? 'Simulated sent' : 'Sent' : message.status === 'FAILED' ? 'Failed' : 'Pending';
+const messageStatus = (message: NonNullable<Job['messages']>[number]) => message.status === 'SENT' ? message.provider === 'MOCK' ? 'Simulated sent' : 'Provider accepted' : message.status === 'FAILED' ? 'Failed' : 'Pending';
 
 function jobTimeline(job: Job) {
   const entries = [

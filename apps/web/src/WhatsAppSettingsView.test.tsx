@@ -7,6 +7,22 @@ import { WhatsAppSettingsView } from './WhatsAppSettingsView';
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('owner WhatsApp settings', () => {
+  it('shows real sender and independent approval states after a non-sending connection test', async () => {
+    let verified = false;
+    const settings = { provider: 'MSG91', enabled: true, senderNumber: '+918137994052', senderDisplayName: 'NevAi', templateReceived: 'kb_vehicle_received', templateWashing: 'kb_wash_started', templateReady: 'kb_vehicle_ready', templateHandedOver: null, status: 'NOT_CONNECTED', templateStatuses: {} };
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path === '/api/whatsapp/test-connection') { verified = true; return Response.json({ message: 'Connected. No customer message was sent.' }); }
+      return Response.json({ ...settings, ...(verified ? { status: 'CONNECTED', templateStatuses: { kb_vehicle_received: 'IN_REVIEW', kb_wash_started: 'IN_REVIEW', kb_vehicle_ready: 'IN_REVIEW' } } : {}) });
+    }));
+    render(<WhatsAppSettingsView />);
+    expect(await screen.findByDisplayValue('+918137994052')).toBeTruthy();
+    expect(screen.getByDisplayValue('NevAi')).toBeTruthy();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Test connection' }));
+    expect(await screen.findByText('Connected. No customer message was sent.')).toBeTruthy();
+    expect(await screen.findByText('kb_vehicle_received: IN REVIEW')).toBeTruthy();
+    expect(screen.getByText('Not configured')).toBeTruthy();
+    expect(screen.queryByText('private-test-key')).toBeNull();
+  });
   it('shows mock status, saves sender/templates, and tests without sending', async () => {
     const settings = { provider: 'MOCK', enabled: true, senderNumber: null, senderDisplayName: null, msg91IntegratedNumberId: null, templateReceived: 'VEHICLE_RECEIVED', templateWashing: 'WASH_STARTED', templateReady: 'VEHICLE_READY', templateHandedOver: 'VEHICLE_HANDED_OVER', status: 'MOCK_ACTIVE', lastVerifiedAt: null };
     const requests: { path: string; method: string; body?: Record<string, unknown> }[] = [];
