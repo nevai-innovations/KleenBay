@@ -40,8 +40,9 @@ Signatures, provider secrets and raw webhook bodies are not logged.
 
 Subscription-row locking and unique payment/order identifiers prevent duplicate
 callbacks or concurrent webhooks from extending the subscription twice.
-Early renewals extend the existing expiry; expired subscriptions restart on
-verification. Calendar-year arithmetic clamps February 29 to February 28.
+Early and grace-period renewals extend the existing expiry; fully expired
+subscriptions restart on verification. Calendar-year arithmetic clamps February
+29 to February 28. See [subscription entitlement rules](subscription-entitlements.md).
 Failed or cancelled attempts cannot shorten an active subscription.
 
 ## Release Gate
