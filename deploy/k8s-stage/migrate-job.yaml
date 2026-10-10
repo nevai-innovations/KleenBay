@@ -15,7 +15,7 @@ spec:
         runAsGroup: 1000
       containers:
         - name: migrate
-          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-api@sha256:20516d5591d39e9c622c3886761e96e75a524c0b343ba0616c724e861d2fb32d
+          image: 208519604276.dkr.ecr.us-east-1.amazonaws.com/kleenbay/stage-api@sha256:a2c75acc0fa893c8d9b10380e840d86025b616e6315a5fd9dd209208f4374568
           command: ["./node_modules/.bin/prisma", "migrate", "deploy"]
           envFrom:
             - configMapRef:
