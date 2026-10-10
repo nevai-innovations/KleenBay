@@ -1,5 +1,16 @@
 # KleenBay
 
+## Subscription Access
+
+Subscription access is enforced by the API: `NOT_SUBSCRIBED -> ACTIVE ->
+GRACE_PERIOD -> EXPIRED`. `SUBSCRIPTION_GRACE_DAYS=7` allows vehicles checked in
+before expiry to finish, including invoicing, payment and handover, but blocks
+new work. After grace, owners retain Billing and read-only historical access;
+employees see an inactive-business message. Verified Razorpay renewal restores
+operations immediately. Public tracking remains available under its usual expiry.
+The local development seed provides a synthetic active demo entitlement only.
+See [subscription rules and stage verification](docs/subscription-entitlements.md).
+
 KleenBay is a car wash operations app. The current API-driven application is in
 `apps/web`, `apps/api`, and `packages/shared`. `prototype/` is an older UX
 reference, not the application to develop or run for normal work.

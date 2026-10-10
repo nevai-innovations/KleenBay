@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { randomBytes } from 'node:crypto';
 import { assertDatabaseTarget } from './database-target.js';
+import { DEFAULT_SUBSCRIPTION_GRACE_DAYS } from './entitlements.js';
 
 loadEnv({ path: resolve(fileURLToPath(new URL('../../../.env', import.meta.url))) });
 
@@ -40,6 +41,7 @@ const schema = z.object({
   RAZORPAY_WEBHOOK_SECRET: z.string().min(16).optional(),
   RAZORPAY_ENV: z.enum(['test', 'live']).default('test'),
   BILLING_POLICIES_APPROVED: z.enum(['true', 'false']).default('false'),
+  SUBSCRIPTION_GRACE_DAYS: z.coerce.number().int().min(0).max(90).default(DEFAULT_SUBSCRIPTION_GRACE_DAYS),
   OTP_TTL_MINUTES: z.coerce.number().int().min(1).max(15).default(5),
   OTP_RESEND_SECONDS: z.coerce.number().int().min(15).max(300).default(60),
   OTP_MAX_ATTEMPTS: z.coerce.number().int().min(3).max(10).default(5),

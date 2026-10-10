@@ -7,6 +7,7 @@ import type { Subscription, SubscriptionPayment } from './generated/prisma/clien
 import { requireOwner } from './auth.js';
 import { audit } from './audit.js';
 import { HttpError, notFound } from './errors.js';
+import { deriveEntitlement, getOrganizationEntitlement, requireActiveSubscription as requireEntitlement } from './entitlements.js';
 import { ANNUAL_PLAN, paymentSchema, type PaymentProvider, type RazorpayOrder, type RazorpayPayment } from './razorpay.js';
 
 const checkoutInput = z.object({ idempotencyKey: z.uuid() }).strict();
@@ -26,9 +27,8 @@ function subscriptionState(subscription: Subscription | null, at = new Date()) {
 }
 
 export async function requireActiveSubscription(db: Db, organizationId: string) {
-  const subscription = await db.subscription.findUnique({ where: { organizationId } });
-  if (subscriptionState(subscription) !== 'ACTIVE') throw new HttpError(402, 'SUBSCRIPTION_REQUIRED', 'An active subscription is required');
-  return subscription!;
+  await requireEntitlement(db, organizationId);
+  return db.subscription.findUniqueOrThrow({ where: { organizationId } });
 }
 
 function paymentDto(payment: SubscriptionPayment) {
@@ -40,7 +40,7 @@ function assertOrder(order: RazorpayOrder, local: SubscriptionPayment) {
   if (order.id !== local.razorpayOrderId || order.amount !== ANNUAL_PLAN.pricePaise || order.currency !== 'INR' || order.receipt !== local.merchantTransactionId || local.amountPaise !== ANNUAL_PLAN.pricePaise || local.currency !== 'INR' || local.provider !== 'RAZORPAY' || (notes && !Array.isArray(notes) && notes.organizationId !== local.organizationId)) throw new HttpError(400, 'PAYMENT_MISMATCH', 'Payment does not match this subscription order');
 }
 
-async function settle(db: Db, local: SubscriptionPayment, result: RazorpayPayment, actorUserId?: string, ipAddress?: string) {
+async function settle(db: Db, local: SubscriptionPayment, result: RazorpayPayment, graceDays: number, actorUserId?: string, ipAddress?: string) {
   if (result.order_id !== local.razorpayOrderId || result.amount !== ANNUAL_PLAN.pricePaise || result.currency !== 'INR' || local.amountPaise !== ANNUAL_PLAN.pricePaise) throw new HttpError(400, 'PAYMENT_MISMATCH', 'Payment does not match this subscription order');
   if (result.status !== 'captured' && result.status !== 'failed') return paymentDto(local);
   if (result.status === 'captured' && !result.captured) throw new HttpError(400, 'PAYMENT_NOT_CAPTURED', 'Payment has not been captured');
@@ -60,22 +60,24 @@ async function settle(db: Db, local: SubscriptionPayment, result: RazorpayPaymen
     }
     const updated = await tx.subscriptionPayment.update({ where: { id: current.id }, data: { status: 'SUCCESS', completedAt: at, failedAt: null, failureReason: null, razorpayPaymentId: result.id, providerTransactionId: result.id, providerStatus: 'captured' } });
     const subscription = await tx.subscription.findUniqueOrThrow({ where: { organizationId: current.organizationId } });
-    const renewing = Boolean(subscription.currentPeriodEnd && subscription.currentPeriodEnd > at);
+    const priorEntitlement = deriveEntitlement(subscription, graceDays, at);
+    const renewing = priorEntitlement.state === 'ACTIVE' || priorEntitlement.state === 'GRACE_PERIOD';
     const periodStart = renewing ? subscription.currentPeriodStart! : at;
     const periodEnd = addCalendarYear(renewing ? subscription.currentPeriodEnd! : at);
     await tx.subscription.update({ where: { id: subscription.id }, data: { status: 'ACTIVE', currentPeriodStart: periodStart, currentPeriodEnd: periodEnd, activatedAt: subscription.activatedAt ?? at, cancelledAt: null } });
     await audit(tx, { organizationId: current.organizationId, actorUserId, action: 'SUBSCRIPTION_PAYMENT_VERIFIED', entityType: 'SubscriptionPayment', entityId: current.id, after: { amountPaise: current.amountPaise, provider: 'RAZORPAY' }, ipAddress });
     await audit(tx, { organizationId: current.organizationId, actorUserId, action: renewing ? 'SUBSCRIPTION_RENEWED' : 'SUBSCRIPTION_ACTIVATED', entityType: 'Subscription', entityId: subscription.id, after: { currentPeriodStart: periodStart.toISOString(), currentPeriodEnd: periodEnd.toISOString() }, ipAddress });
+    if (priorEntitlement.state !== 'ACTIVE') await audit(tx, { organizationId: current.organizationId, actorUserId, action: 'SUBSCRIPTION_ACCESS_RESTORED', entityType: 'Subscription', entityId: subscription.id, before: { state: priorEntitlement.state }, after: { state: 'ACTIVE' }, ipAddress });
     return paymentDto(updated);
   });
 }
 
-async function reconcile(db: Db, provider: PaymentProvider, local: SubscriptionPayment, actorUserId?: string, ipAddress?: string) {
+async function reconcile(db: Db, provider: PaymentProvider, local: SubscriptionPayment, graceDays: number, actorUserId?: string, ipAddress?: string) {
   if (local.status === 'SUCCESS' || !local.razorpayOrderId || local.provider !== 'RAZORPAY') return paymentDto(local);
   assertOrder(await provider.fetchOrder(local.razorpayOrderId), local);
   const payments = await provider.fetchOrderPayments(local.razorpayOrderId);
   const result = payments.find((payment) => payment.status === 'captured') ?? payments.find((payment) => payment.status === 'failed');
-  return result ? settle(db, local, result, actorUserId, ipAddress) : paymentDto(local);
+  return result ? settle(db, local, result, graceDays, actorUserId, ipAddress) : paymentDto(local);
 }
 
 export function registerBillingRoutes(app: FastifyInstance, db: Db, config: Config, provider: PaymentProvider | null) {
@@ -88,7 +90,8 @@ export function registerBillingRoutes(app: FastifyInstance, db: Db, config: Conf
     const [subscription, payments] = await Promise.all([db.subscription.findUnique({ where: { organizationId: owner.organizationId } }), db.subscriptionPayment.findMany({ where: { organizationId: owner.organizationId }, orderBy: { initiatedAt: 'desc' }, take: 100 })]);
     const now = new Date();
     const status = subscriptionState(subscription, now);
-    return { plan: ANNUAL_PLAN, checkoutAvailable: provider !== null, environment: config.RAZORPAY_ENV, subscription: { status, currentPeriodStart: subscription?.currentPeriodStart ?? null, currentPeriodEnd: subscription?.currentPeriodEnd ?? null, daysRemaining: subscription?.currentPeriodEnd && status === 'ACTIVE' ? Math.ceil((subscription.currentPeriodEnd.getTime() - now.getTime()) / 86400000) : 0 }, payments: payments.map(paymentDto) };
+    const entitlement = await getOrganizationEntitlement(db, owner.organizationId, config.SUBSCRIPTION_GRACE_DAYS, now);
+    return { plan: ANNUAL_PLAN, checkoutAvailable: provider !== null, environment: config.RAZORPAY_ENV, subscription: { status, ...entitlement }, payments: payments.map(paymentDto) };
   });
   app.get('/api/billing/payments', async (request) => {
     const owner = await requireOwner(db, request);
@@ -147,7 +150,7 @@ export function registerBillingRoutes(app: FastifyInstance, db: Db, config: Conf
     const { id } = transactionParams.parse(request.params);
     const payment = await db.subscriptionPayment.findFirst({ where: { id, organizationId: owner.organizationId } });
     if (!payment) notFound();
-    return reconcile(db, configured(), payment, owner.id, request.ip);
+    return reconcile(db, configured(), payment, config.SUBSCRIPTION_GRACE_DAYS, owner.id, request.ip);
   });
   app.post('/api/billing/transactions/:id/cancel', async (request) => {
     const owner = await requireOwner(db, request);
@@ -155,7 +158,7 @@ export function registerBillingRoutes(app: FastifyInstance, db: Db, config: Conf
     const { outcome } = z.object({ outcome: z.enum(['CANCELLED', 'FAILED']) }).strict().parse(request.body);
     const payment = await db.subscriptionPayment.findFirst({ where: { id, organizationId: owner.organizationId, provider: 'RAZORPAY' } });
     if (!payment) notFound();
-    await reconcile(db, configured(), payment, owner.id, request.ip);
+    await reconcile(db, configured(), payment, config.SUBSCRIPTION_GRACE_DAYS, owner.id, request.ip);
     return db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "Subscription" WHERE "organizationId" = ${owner.organizationId} FOR UPDATE`;
       const current = await tx.subscriptionPayment.findUniqueOrThrow({ where: { id } });
@@ -180,7 +183,7 @@ export function registerBillingRoutes(app: FastifyInstance, db: Db, config: Conf
     assertOrder(await gateway.fetchOrder(local.razorpayOrderId!), local);
     const payment = await gateway.fetchPayment(input.razorpay_payment_id);
     if (payment.id !== input.razorpay_payment_id) throw new HttpError(400, 'PAYMENT_MISMATCH', 'Payment reference does not match');
-    return settle(db, local, payment, owner.id, request.ip);
+    return settle(db, local, payment, config.SUBSCRIPTION_GRACE_DAYS, owner.id, request.ip);
   });
 
   // Authenticate provider callbacks using the exact raw body, independently of owner sessions.
@@ -204,7 +207,7 @@ export function registerBillingRoutes(app: FastifyInstance, db: Db, config: Conf
       assertOrder(await gateway.fetchOrder(local.razorpayOrderId!), local);
       const confirmed = await gateway.fetchPayment(payment.id);
       if (confirmed.id !== payment.id) throw new HttpError(400, 'PAYMENT_MISMATCH', 'Payment reference does not match');
-      await settle(db, local, confirmed);
+      await settle(db, local, confirmed, config.SUBSCRIPTION_GRACE_DAYS);
       return { received: true };
     });
   });

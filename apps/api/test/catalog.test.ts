@@ -6,6 +6,7 @@ import { resolveServicePrice } from '../src/catalog.js';
 import { getConfig } from '../src/config.js';
 import { createDb } from '../src/db.js';
 import { assertLocalTestDatabase } from '../src/database-target.js';
+import { createPaidTestOrganization } from './paid-fixture.js';
 
 const testUrl = assertLocalTestDatabase(process.env.TEST_DATABASE_URL);
 const db = createDb(testUrl);
@@ -29,7 +30,7 @@ function request(method: 'GET' | 'POST' | 'PATCH' | 'PUT', url: string, body?: u
 }
 
 beforeAll(async () => {
-  const org = await db.organization.create({ data: { slug, name: 'Catalog Test' } });
+  const org = await createPaidTestOrganization(db, { data: { slug, name: 'Catalog Test' } });
   organizationId = org.id;
   const branch = await db.branch.create({ data: { organizationId, name: 'Main' } });
   branchId = branch.id;
@@ -85,7 +86,7 @@ describe('M2 catalog and tenant boundaries', () => {
   });
 
   it('scopes customer and vehicle access to the organization', async () => {
-    const foreignOrg = await db.organization.create({ data: { slug: `foreign-${randomUUID()}`, name: 'Foreign Wash' } });
+    const foreignOrg = await createPaidTestOrganization(db, { data: { slug: `foreign-${randomUUID()}`, name: 'Foreign Wash' } });
     const foreignCustomer = await db.customer.create({ data: { organizationId: foreignOrg.id, name: 'Foreign', mobile: '+919845612305' } });
     expect((await request('GET', `/api/customers/${foreignCustomer.id}`, undefined, ownerCookie)).statusCode).toBe(404);
     expect((await request('POST', '/api/vehicles', { customerId: foreignCustomer.id, registrationNumber: 'KA03MN4567', make: 'Honda', model: 'City', type: 'SEDAN' }, ownerCookie)).statusCode).toBe(404);

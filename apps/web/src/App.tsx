@@ -8,6 +8,7 @@ import { OwnerSetupView } from './OwnerSetupView';
 import { WhatsAppSettingsView } from './WhatsAppSettingsView';
 import { TrackingView } from './TrackingView';
 import { BillingView } from './BillingView';
+import { EntitlementBoundary } from './Entitlement';
 import { InvoicesView } from './InvoicesView';
 import { BranchesView } from './BranchesView';
 import { isLegalPath, LegalView } from './LegalView';
@@ -279,5 +280,5 @@ export default function App() {
   if (setupToken) return <OwnerSetupView token={setupToken} onComplete={() => { window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`); setSetupToken(null); }} />;
   if (!session) return <Login onLogin={setSession} />;
   if ((window.location.pathname === '/billing' || window.location.pathname === '/branches' || window.location.pathname.startsWith('/invoices')) && session.user.role !== 'OWNER') return <main className="login-page"><div className="login-box"><h1>Access denied</h1><p>Owner access required.</p><button className="btn" onClick={() => { window.history.replaceState(null, '', '/'); window.location.reload(); }}>Back to board</button></div></main>;
-  return <>{session.user.role === 'OWNER' ? <OwnerPortal session={session} onLogout={() => void logout()} /> : <EmployeePortal session={session} onLogout={() => void logout()} />}{logoutError && <div className="global-error" role="alert">{logoutError}</div>}</>;
+  return <EntitlementBoundary role={session.user.role} onLogout={() => void logout()}>{session.user.role === 'OWNER' ? <OwnerPortal session={session} onLogout={() => void logout()} /> : <EmployeePortal session={session} onLogout={() => void logout()} />}{logoutError && <div className="global-error" role="alert">{logoutError}</div>}</EntitlementBoundary>;
 }

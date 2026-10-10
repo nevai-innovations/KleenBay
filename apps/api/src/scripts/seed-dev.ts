@@ -5,11 +5,17 @@ import { getConfig } from '../config.js';
 
 const config = getConfig();
 if (config.NODE_ENV === 'production') throw new Error('Development seed cannot run in production');
+if (!['localhost', '127.0.0.1', '[::1]'].includes(new URL(config.DATABASE_URL).hostname)) throw new Error('Development seed requires a local database');
 const db = createDb(config.DATABASE_URL);
 const password = process.env.DEV_SEED_PASSWORD || randomBytes(18).toString('base64url');
 
 try {
   const org = await db.organization.upsert({ where: { slug: 'sparkle' }, update: {}, create: { slug: 'sparkle', name: 'Sparkle Car Wash' } });
+  // Synthetic local entitlement, not a paid transaction. Never run this seed on stage/prod.
+  const start = new Date();
+  const end = new Date(start);
+  end.setUTCFullYear(end.getUTCFullYear() + 1);
+  await db.subscription.upsert({ where: { organizationId: org.id }, update: {}, create: { organizationId: org.id, status: 'ACTIVE', activatedAt: start, currentPeriodStart: start, currentPeriodEnd: end } });
   const branch = await db.branch.upsert({ where: { organizationId_name: { organizationId: org.id, name: 'Main Branch' } }, update: {}, create: { organizationId: org.id, name: 'Main Branch' } });
   const owner = await db.user.findFirst({ where: { organizationId: org.id, username: 'suresh' } });
   if (!owner) await db.user.create({ data: { organizationId: org.id, branchId: branch.id, role: 'OWNER', name: 'Suresh', username: 'suresh', email: 'suresh@example.local', passwordHash: await hash(password) } });

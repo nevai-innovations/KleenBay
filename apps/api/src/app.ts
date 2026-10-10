@@ -27,6 +27,7 @@ import { createPaymentProvider, type PaymentProvider } from './razorpay.js';
 import { registerBillingRoutes } from './billing.js';
 import { registerInvoiceRoutes } from './invoices.js';
 import { registerBranchRoutes } from './branches.js';
+import { configureEntitlements, requestEntitlement } from './entitlements.js';
 
 class RouteOnlyLogController extends LogController {
   constructor() { super({ disableRequestLogging: true }); }
@@ -37,6 +38,7 @@ export async function buildApp(config: Config, db: Db, otp: OtpProvider = create
   if (config.NODE_ENV === 'production' && !config.stagingMode && storage instanceof LocalStorageProvider) throw new Error('Configure a production storage provider before startup');
   const app = Fastify({ logger: { level: config.LOG_LEVEL }, logController: new RouteOnlyLogController(), trustProxy: config.TRUST_PROXY_HOPS > 0 ? (_address, hop) => hop < config.TRUST_PROXY_HOPS : false });
   await app.register(cookie);
+  configureEntitlements(app, config.SUBSCRIPTION_GRACE_DAYS);
   await app.register(cors, { origin: config.APP_ORIGIN, credentials: true });
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(rateLimit, { max: 120, timeWindow: '1 minute' });
@@ -98,6 +100,12 @@ export async function buildApp(config: Config, db: Db, otp: OtpProvider = create
     const user = await currentUser(db, request);
     const org = await db.organization.findUniqueOrThrow({ where: { id: user.organizationId } });
     return { user: { id: user.id, role: user.role, name: user.name, organizationId: user.organizationId, branchId: user.branchId }, organization: { id: org.id, name: org.name } };
+  });
+
+  app.get('/api/entitlement', async (request) => {
+    const user = await currentUser(db, request);
+    const entitlement = await requestEntitlement(db, user, request);
+    return user.role === 'OWNER' ? entitlement : { canCreateWork: entitlement.canCreateWork, canOperate: entitlement.canOperate };
   });
 
   app.post('/api/auth/logout', async (request, reply) => {

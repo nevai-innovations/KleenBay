@@ -11,6 +11,7 @@ import { dispatchMessage, messageRecipient, renderCustomerMessage, type Messagin
 import { createTrackingToken, readTrackingToken, trackingUrl } from './tracking.js';
 import type { Config } from './config.js';
 import { activeInvoice, issueInvoice, prepareInvoice } from './invoices.js';
+import { requestEntitlement } from './entitlements.js';
 
 const idParams = z.object({ id: z.string().min(1) });
 const listQuery = z.object({
@@ -123,9 +124,10 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
 
   app.get('/api/operations/capabilities', async (request) => {
     const user = await currentUser(db, request);
+    const access = await requestEntitlement(db, user, request);
     const org = await db.organization.findUniqueOrThrow({ where: { id: user.organizationId }, select: { allowOutstanding: true, employeeHandover: true, employeeAddons: true } });
-    if (user.role === 'EMPLOYEE') return { canHandover: org.employeeHandover && org.allowOutstanding, canAddOns: org.employeeAddons };
-    return { allowOutstanding: org.allowOutstanding, canHandover: true };
+    if (user.role === 'EMPLOYEE') return { canHandover: access.canOperate && org.employeeHandover && org.allowOutstanding, canAddOns: access.canOperate && org.employeeAddons };
+    return { allowOutstanding: org.allowOutstanding, canHandover: access.canOperate };
   });
 
   app.get('/api/operations/available-employees', async (request) => {
@@ -174,6 +176,10 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
         { serviceName: { contains: input.q, mode: 'insensitive' } },
       ] } : {}),
     };
+    const entitlement = await requestEntitlement(db, user, request);
+    if (user.role === 'EMPLOYEE' && entitlement.state === 'GRACE_PERIOD') {
+      where.AND = [{ checkedInAt: { lt: entitlement.currentPeriodEnd! } }, { status: { not: 'HANDED_OVER' } }];
+    }
     const jobs = await db.job.findMany({ where, include: { branch: { select: { id: true, name: true } }, customer: { select: { id: true, name: true, mobile: true } }, vehicle: { select: { id: true, registrationNumber: true, make: true, model: true } } }, orderBy: { checkedInAt: 'desc' }, take: 150 });
     if (user.role === 'OWNER') return jobs.map(({ trackingTokenHash: _hash, trackingTokenCiphertext: _ciphertext, ...job }) => job);
     return jobs.map((job) => ({
@@ -197,7 +203,8 @@ export function registerOperationsRoutes(app: FastifyInstance, db: Db, messaging
     const { branchId, date } = z.object({ branchId: z.string().optional(), date: z.iso.date().optional() }).parse(request.query);
     if (branchId && user.role === 'EMPLOYEE' && branchId !== user.branchId) forbidden();
     if (branchId && user.role === 'OWNER' && !await db.branch.findFirst({ where: { id: branchId, organizationId: user.organizationId } })) notFound();
-    const scope = { ...jobScope(user), ...(branchId ? { branchId } : {}) };
+    const entitlement = await requestEntitlement(db, user, request);
+    const scope = { ...jobScope(user), ...(branchId ? { branchId } : {}), ...(user.role === 'EMPLOYEE' && entitlement.state === 'GRACE_PERIOD' ? { checkedInAt: { lt: entitlement.currentPeriodEnd! } } : {}) };
     const [received, washing, ready, late] = await Promise.all([
       db.job.count({ where: { ...scope, status: 'RECEIVED' } }),
       db.job.count({ where: { ...scope, status: 'WASHING' } }),

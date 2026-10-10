@@ -6,7 +6,7 @@ type Payment = { id: string; provider: string; merchantTransactionId: string; pr
 type Billing = {
   plan: { code: string; name: string; pricePaise: number; currency: string; billingInterval: string };
   checkoutAvailable: boolean;
-  subscription: { status: string; currentPeriodStart: string | null; currentPeriodEnd: string | null; daysRemaining: number };
+  subscription: { status: string; state?: string; currentPeriodStart: string | null; currentPeriodEnd: string | null; daysRemaining: number; graceEndsAt?: string | null; graceDaysRemaining?: number };
   payments: Payment[];
 };
 type Checkout = { transactionId: string; keyId: string; orderId: string; amountPaise: number; currency: string; name: string; prefill: { name?: string; email?: string } };
@@ -41,6 +41,7 @@ export function BillingView() {
         try {
           const payment = await post<Payment>('/billing/razorpay/verify', response);
           await refresh();
+          window.dispatchEvent(new Event('kleenbay:subscription-updated'));
           if (payment.status !== 'SUCCESS') setError('Payment is awaiting capture. Check pending payment shortly.');
         } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not verify payment. Check pending payment before paying again.'); }
         finally { setBusy(false); }
@@ -62,8 +63,8 @@ export function BillingView() {
   if (loading) return <div className="billing-page"><p role="status">Loading billing...</p></div>;
   if (!billing) return <div className="billing-page"><div role="alert">{error || 'Billing is unavailable'}</div><button className="btn" onClick={() => { setLoading(true); void refresh(); }}>Retry</button></div>;
 
-  const status = billing.subscription.status;
-  const statusLabel: Record<string, string> = { INACTIVE: 'Not subscribed', PAYMENT_PENDING: 'Payment pending', PAYMENT_FAILED: 'Payment unsuccessful', EXPIRED: 'Expired', ACTIVE: 'Active' };
+  const status = billing.subscription.state ?? billing.subscription.status;
+  const statusLabel: Record<string, string> = { NOT_SUBSCRIBED: 'Not subscribed', INACTIVE: 'Not subscribed', PAYMENT_PENDING: 'Payment pending', PAYMENT_FAILED: 'Payment unsuccessful', EXPIRED: 'Subscription expired', GRACE_PERIOD: 'Subscription expired - Grace period', ACTIVE: 'Active' };
   const pending = billing.payments.find((payment) => payment.status === 'INITIATED');
   return <div className="billing-page">
     <div className="section-head"><div><h2>Subscription</h2><p>Manage your KleenBay plan.</p></div></div>
@@ -72,7 +73,9 @@ export function BillingView() {
       <p className="billing-note">WhatsApp Business API/provider charges are billed separately.</p>
       {status === 'ACTIVE' && billing.subscription.currentPeriodStart && billing.subscription.currentPeriodEnd && <div className="billing-facts"><p>Started <strong>{date(billing.subscription.currentPeriodStart)}</strong></p><p>Valid until <strong>{date(billing.subscription.currentPeriodEnd)}</strong></p><p>Days remaining <strong>{billing.subscription.daysRemaining}</strong></p></div>}
       {status === 'EXPIRED' && billing.subscription.currentPeriodEnd && <p>Expired on {date(billing.subscription.currentPeriodEnd)}.</p>}
-      {billing.checkoutAvailable ? <div className="billing-checkout"><button type="button" className="btn primary" disabled={busy} onClick={() => void checkout()}>{busy ? 'Processing...' : status === 'ACTIVE' ? 'Renew subscription' : status === 'EXPIRED' ? `Renew for ${money(billing.plan.pricePaise)}` : status === 'PAYMENT_FAILED' ? 'Try again' : `Subscribe for ${money(billing.plan.pricePaise)}`}</button></div> : <p className="billing-note">Online subscription checkout is not configured for this environment.</p>}
+      {status === 'GRACE_PERIOD' && <><p>Your subscription has expired. Existing vehicles can be completed, but new check-ins are disabled. Renew to continue normal operations.</p><div className="billing-facts"><p>Expired on <strong>{date(billing.subscription.currentPeriodEnd!)}</strong></p><p>Grace ends <strong>{date(billing.subscription.graceEndsAt!)}</strong></p><p>Days remaining in grace <strong>{billing.subscription.graceDaysRemaining}</strong></p></div></>}
+      {status === 'EXPIRED' && <p>Renew your KleenBay subscription to continue operations.</p>}
+      {billing.checkoutAvailable ? <div className="billing-checkout"><button type="button" className="btn primary" disabled={busy} onClick={() => void checkout()}>{busy ? 'Processing...' : status === 'ACTIVE' ? 'Renew subscription' : status === 'GRACE_PERIOD' ? 'Renew now' : status === 'EXPIRED' ? `Renew for ${money(billing.plan.pricePaise)}` : status === 'PAYMENT_FAILED' ? 'Try again' : `Subscribe for ${money(billing.plan.pricePaise)}/year`}</button></div> : <p className="billing-note">Online subscription checkout is not configured for this environment.</p>}
       {pending && <button type="button" className="btn" disabled={busy} onClick={() => void reconcile(pending)}>Check pending payment</button>}
       {error && <div className="portal-error" role="alert">{error}</div>}
       <nav className="billing-policies" aria-label="Billing policies"><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/subscription-policy">Subscription</a><a href="/refund-policy">Refunds</a><a href="/delivery-policy">Service delivery</a></nav>

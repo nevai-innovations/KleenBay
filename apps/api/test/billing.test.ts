@@ -125,6 +125,30 @@ describe('Razorpay organization billing', () => {
     const renewed = await checkout(); await verify(providerPayment(renewed.orderId)); const second = (await billing()).subscription;
     expect(second.currentPeriodStart).toBe(first.currentPeriodStart); expect(second.currentPeriodEnd).toBe(addCalendarYear(new Date(first.currentPeriodEnd)).toISOString());
   });
+  it.each(['GRACE_PERIOD', 'EXPIRED'] as const)('renews %s once and immediately restores owner and employee operations', async (state) => {
+    const first = await checkout(); await verify(providerPayment(first.orderId));
+    const end = new Date(Date.now() - (state === 'GRACE_PERIOD' ? 1 : 8) * 86400000);
+    const start = new Date(end.getTime() - 365 * 86400000);
+    await db.subscription.update({ where: { organizationId: orgId }, data: { currentPeriodStart: start, currentPeriodEnd: end } });
+    const branch = await db.branch.create({ data: { organizationId: orgId, name: 'Main' } });
+    const service = await db.service.create({ data: { organizationId: orgId, name: 'Wash', category: 'Wash', basePricePaise: 10000, estimatedMinutes: 30 } });
+    await db.user.updateMany({ where: { organizationId: orgId, role: 'EMPLOYEE' }, data: { branchId: branch.id } });
+    const job = { idempotencyKey: randomUUID(), branchId: branch.id, mobile: '9876543280', customerName: 'Renewal Test', registrationNumber: 'KA01AB1234', make: 'Tata', model: 'Nexon', vehicleType: 'SUV', serviceId: service.id, expectedAt: new Date(Date.now() + 3600000).toISOString(), notify: false };
+    expect((await request('POST', '/api/jobs/check-in', ownerCookie, job)).statusCode).toBe(402);
+    expect((await request('GET', '/api/entitlement')).json().state).toBe(state);
+    const renewal = await checkout(); const payment = providerPayment(renewal.orderId);
+    expect((await verify(payment)).statusCode).toBe(200);
+    const restored = (await billing()).subscription;
+    expect(restored.state).toBe('ACTIVE');
+    if (state === 'GRACE_PERIOD') { expect(restored.currentPeriodEnd).toBe(addCalendarYear(end).toISOString()); expect(restored.currentPeriodStart).toBe(start.toISOString()); }
+    else expect(new Date(restored.currentPeriodStart).getTime()).toBeGreaterThan(Date.now() - 60000);
+    expect((await request('POST', '/api/jobs/check-in', ownerCookie, job)).statusCode).toBe(201);
+    expect((await request('GET', '/api/jobs', employeeCookie)).statusCode).toBe(200);
+    await Promise.all([verify(payment), webhook(payment), webhook(payment)]);
+    expect((await billing()).subscription.currentPeriodEnd).toBe(restored.currentPeriodEnd);
+    const audits = await db.auditLog.findMany({ where: { organizationId: orgId, action: 'SUBSCRIPTION_ACCESS_RESTORED' } });
+    expect(audits.filter((entry) => (entry.before as { state: string }).state === state)).toHaveLength(1);
+  });
   it('serializes two distinct concurrent paid renewals without losing a year', async () => {
     const a = await checkout(); const b = await checkout(); const pa = providerPayment(a.orderId); const pb = providerPayment(b.orderId);
     const responses = await Promise.all([verify(pa), verify(pb)]); expect(responses.map((r) => r.statusCode)).toEqual([200, 200]);

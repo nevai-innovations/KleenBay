@@ -18,6 +18,7 @@ function mockApi(provider: 'development' | 'dummy' | 'msg91' = 'development') {
   vi.stubGlobal('fetch', vi.fn(async (path: string, options?: RequestInit) => {
     const body = options?.body ? JSON.parse(String(options.body)) as Record<string, string> : undefined;
     requests.push({ path, body });
+    if (path.endsWith('/entitlement')) return Response.json({ state: 'ACTIVE', daysRemaining: 365, canCreateWork: true, canOperate: true });
     if (path.endsWith('/auth/me')) return Response.json({ error: { message: 'Sign in required' } }, { status: 401 });
     if (path.endsWith('/auth/employee/otp-config')) return Response.json(provider === 'msg91' ? { provider, otpLength: 6, widgetId: 'test-widget', widgetToken: 'public-token' } : { provider, otpLength: 6 });
     if (path.endsWith('/auth/employee/request-otp')) return Response.json({ status: 'sent', resendAfterSeconds: 60, expiresInSeconds: 300, otpLength: 6 });
@@ -36,7 +37,8 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(
 describe('billing access', () => {
   it('shows Branches only in the owner navigation and denies direct employee entry', async () => {
     vi.stubGlobal('fetch', vi.fn(async (path: string) => {
-      if (path.endsWith('/auth/me')) return Response.json(ownerSession);
+      if (path.endsWith('/entitlement')) return Response.json({ state: 'ACTIVE', daysRemaining: 365, canCreateWork: true, canOperate: true });
+    if (path.endsWith('/auth/me')) return Response.json(ownerSession);
       if (path.endsWith('/employees') || path.endsWith('/branches')) return Response.json([]);
       if (path.startsWith('/api/jobs?')) return Response.json([]);
       if (path.startsWith('/api/board/metrics')) return Response.json({ inBay: 0, ready: 0, late: 0 });
@@ -53,7 +55,8 @@ describe('billing access', () => {
     cleanup();
     window.history.replaceState(null, '', '/branches');
     vi.stubGlobal('fetch', vi.fn(async (path: string) => {
-      if (path.endsWith('/auth/me')) return Response.json(employeeSession);
+      if (path.endsWith('/entitlement')) return Response.json({ state: 'ACTIVE', daysRemaining: 365, canCreateWork: true, canOperate: true });
+    if (path.endsWith('/auth/me')) return Response.json(employeeSession);
       throw new Error(`Unexpected employee request ${path}`);
     }));
     render(<App />);
@@ -64,7 +67,8 @@ describe('billing access', () => {
     const requests: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (path: string) => {
       requests.push(path);
-      if (path.endsWith('/auth/me')) return Response.json(ownerSession);
+      if (path.endsWith('/entitlement')) return Response.json({ state: 'ACTIVE', daysRemaining: 365, canCreateWork: true, canOperate: true });
+    if (path.endsWith('/auth/me')) return Response.json(ownerSession);
       if (path.endsWith('/employees') || path.endsWith('/branches')) return Response.json([]);
       if (path.endsWith('/billing')) return Response.json({ plan: { code: 'KLEENBAY_ANNUAL', name: 'KleenBay Annual', pricePaise: 720000, currency: 'INR', billingInterval: 'YEAR' }, checkoutAvailable: false, subscription: { status: 'INACTIVE', currentPeriodStart: null, currentPeriodEnd: null, daysRemaining: 0 }, payments: [] });
       if (path.startsWith('/api/jobs?')) return Response.json([]);
@@ -87,7 +91,8 @@ describe('billing access', () => {
     const requests: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (path: string) => {
       requests.push(path);
-      if (path.endsWith('/auth/me')) return Response.json(employeeSession);
+      if (path.endsWith('/entitlement')) return Response.json({ state: 'ACTIVE', daysRemaining: 365, canCreateWork: true, canOperate: true });
+    if (path.endsWith('/auth/me')) return Response.json(employeeSession);
       throw new Error(`Unexpected API request: ${path}`);
     }));
     render(<App />);
@@ -207,7 +212,8 @@ describe('owner catalog', () => {
     const requests: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (path: string) => {
       requests.push(path);
-      if (path.endsWith('/auth/me')) return Response.json(ownerSession);
+      if (path.endsWith('/entitlement')) return Response.json({ state: 'ACTIVE', daysRemaining: 365, canCreateWork: true, canOperate: true });
+    if (path.endsWith('/auth/me')) return Response.json(ownerSession);
       if (path.endsWith('/employees')) return Response.json([]);
       if (path.endsWith('/branches')) return Response.json([{ id: 'branch-1', name: 'Main', address: null, phone: null }]);
       if (path.startsWith('/api/jobs?')) return Response.json([]);
@@ -242,7 +248,8 @@ describe('owner catalog', () => {
 describe('billing access', () => {
   it('shows Billing only to owners and loads the owner page', async () => {
     vi.stubGlobal('fetch', vi.fn(async (path: string) => {
-      if (path.endsWith('/auth/me')) return Response.json(ownerSession);
+      if (path.endsWith('/entitlement')) return Response.json({ state: 'ACTIVE', daysRemaining: 365, canCreateWork: true, canOperate: true });
+    if (path.endsWith('/auth/me')) return Response.json(ownerSession);
       if (path.endsWith('/employees') || path.endsWith('/branches')) return Response.json([]);
       if (path.endsWith('/billing')) return Response.json({ plan: { code: 'KLEENBAY_ANNUAL', name: 'KleenBay Annual', pricePaise: 720000, currency: 'INR', billingInterval: 'YEAR' }, checkoutAvailable: false, subscription: { status: 'INACTIVE', currentPeriodStart: null, currentPeriodEnd: null, daysRemaining: 0 }, payments: [] });
       if (path.startsWith('/api/jobs?')) return Response.json([]);
@@ -263,7 +270,8 @@ describe('billing access', () => {
     const requests: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (path: string) => {
       requests.push(path);
-      if (path.endsWith('/auth/me')) return Response.json(employeeSession);
+      if (path.endsWith('/entitlement')) return Response.json({ state: 'ACTIVE', daysRemaining: 365, canCreateWork: true, canOperate: true });
+    if (path.endsWith('/auth/me')) return Response.json(employeeSession);
       throw new Error(`Unexpected API request: ${path}`);
     }));
     render(<App />);

@@ -1,3 +1,4 @@
+import { createPaidTestOrganization } from './paid-fixture.js';
 import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { hash } from '@node-rs/argon2';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -22,7 +23,7 @@ beforeAll(async () => {
   app = await buildApp(config, db);
   await app.ready();
   for (const [index, name] of names.entries()) {
-    const org = await db.organization.create({ data: { slug: `tenant-${suffix}-${index}`, name: `${name} Test Wash` } });
+    const org = await createPaidTestOrganization(db, { data: { slug: `tenant-${suffix}-${index}`, name: `${name} Test Wash` } });
     const branch = await db.branch.create({ data: { organizationId: org.id, name: 'Main' } });
     const email = `${name.toLowerCase().replaceAll(' ', '')}-${suffix}@example.test`;
     const owner = await db.user.create({ data: { organizationId: org.id, branchId: branch.id, role: 'OWNER', name, email, passwordHash: await hash(password) } });
@@ -108,7 +109,7 @@ describe('one owner per isolated business', () => {
   });
 
   it('accepts only valid single-use password setup tokens without an organization hint', async () => {
-    const org = await db.organization.create({ data: { slug: `pending-${suffix}`, name: 'Pending Test Wash' } });
+    const org = await createPaidTestOrganization(db, { data: { slug: `pending-${suffix}`, name: 'Pending Test Wash' } });
     const owner = await db.user.create({ data: { organizationId: org.id, role: 'OWNER', name: 'Pending', email: `pending-${suffix}@example.test`, active: false } });
     const token = randomBytes(32).toString('base64url');
     const setup = await db.ownerSetup.create({ data: { organizationId: org.id, userId: owner.id, tokenHash: createHash('sha256').update(token).digest('hex'), expiresAt: new Date(Date.now() + 60_000) } });

@@ -3,6 +3,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from './config.js';
 import type { Db } from './db.js';
 import { forbidden, HttpError } from './errors.js';
+import { enforceEntitlement } from './entitlements.js';
 
 export const cookieName = 'kleenbay_session';
 
@@ -18,19 +19,21 @@ export async function startSession(db: Db, reply: FastifyReply, config: Config, 
   });
 }
 
-export async function currentUser(db: Db, request: FastifyRequest) {
+export async function currentUser(db: Db, request: FastifyRequest, deferEntitlement = false) {
   const token = request.cookies[cookieName];
   if (!token) throw new HttpError(401, 'UNAUTHENTICATED', 'Sign in required');
   const session = await db.session.findUnique({ where: { tokenHash: digest(token) }, include: { user: true } });
   if (!session || session.revokedAt || session.expiresAt <= new Date() || !session.user.active || session.organizationId !== session.user.organizationId) {
     throw new HttpError(401, 'UNAUTHENTICATED', 'Session expired');
   }
+  if (!deferEntitlement) await enforceEntitlement(db, session.user, request);
   return session.user;
 }
 
 export async function requireOwner(db: Db, request: FastifyRequest) {
-  const user = await currentUser(db, request);
+  const user = await currentUser(db, request, true);
   if (user.role !== 'OWNER') forbidden();
+  await enforceEntitlement(db, user, request);
   return user;
 }
 

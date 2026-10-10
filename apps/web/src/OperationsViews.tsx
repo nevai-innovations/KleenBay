@@ -3,6 +3,7 @@ import { ArrowRight, Check, Copy, MessageCircle, Plus, RotateCcw, Search, X } fr
 import { canMoveStage, stageLabels, type Stage } from '@carwash/shared';
 import { api, patch, post, upload, type AvailableEmployee, type BoardMetrics, type Branch, type Customer, type Job, type JobStage, type OperationCapabilities, type OperationSettings, type SaleItem, type Service, type Session, type Vehicle } from './api';
 import { JobInvoicePanel } from './InvoicesView';
+import { useOperationalAccess } from './Entitlement';
 
 const activeStages: JobStage[] = ['RECEIVED', 'WASHING', 'READY'];
 const stageTone: Record<JobStage, string> = { RECEIVED: 'var(--st-0)', WASHING: 'var(--st-2)', READY: 'var(--st-4)', HANDED_OVER: 'var(--st-4)' };
@@ -117,12 +118,14 @@ function CheckInSheet({ session, branches, services, employees, onClose, onSaved
 }
 
 function JobCard({ job, onOpen, onAdvance, onHandover, busy, canHandover, late }: { job: Job; onOpen: () => void; onAdvance: () => void; onHandover: () => void; busy: boolean; canHandover: boolean; late: boolean }) {
+  const access = useOperationalAccess();
+  const canMutate = access.canOperate && (access.state !== 'GRACE_PERIOD' || (!!access.currentPeriodEnd && new Date(job.checkedInAt) < new Date(access.currentPeriodEnd)));
   const action = job.status === 'RECEIVED' ? 'Start Washing' : job.status === 'WASHING' ? 'Mark Ready' : 'Handover';
   function dragStart(event: DragEvent<HTMLElement>) { event.dataTransfer.setData('text/plain', job.id); event.dataTransfer.effectAllowed = 'move'; }
-  return <article className={`job${late ? ' is-late' : ''}`} style={{ '--stage': stageTone[job.status] } as React.CSSProperties} draggable={job.status !== 'READY'} onDragStart={dragStart} data-job-id={job.id}>
+  return <article className={`job${late ? ' is-late' : ''}`} style={{ '--stage': stageTone[job.status] } as React.CSSProperties} draggable={canMutate && job.status !== 'READY'} onDragStart={dragStart} data-job-id={job.id}>
     <button type="button" className="job-open" onClick={onOpen}><strong className="plate">{job.vehicle.registrationNumber}</strong><span className="job-sub">{job.vehicle.make} {job.vehicle.model} · {job.customer.name}</span><span className="job-foot"><span className="job-svc">{job.serviceName}</span><span className={`age${late ? ' late' : job.status === 'READY' ? ' ready' : ''}`}>{late ? `Late · expected ${clock(job.expectedAt)}` : `Expected ${clock(job.expectedAt)}`}</span></span></button>
     <div className="track" aria-hidden="true">{activeStages.map((stage, index) => <i key={stage} className={index <= activeStages.indexOf(job.status) ? 'on' : ''} />)}</div>
-    {job.status === 'READY' && !canHandover ? <div className="ops-card-note">Owner handover required</div> : <button type="button" className={`act${job.status === 'READY' ? ' final' : ''}`} disabled={busy} onClick={job.status === 'READY' ? onHandover : onAdvance}><span>{action}</span><ArrowRight size={18} /></button>}
+    {job.status === 'READY' && !canHandover ? <div className="ops-card-note">Owner handover required</div> : <button type="button" className={`act${job.status === 'READY' ? ' final' : ''}`} disabled={busy || !canMutate} onClick={job.status === 'READY' ? onHandover : onAdvance}><span>{action}</span><ArrowRight size={18} /></button>}
   </article>;
 }
 
@@ -237,6 +240,7 @@ function JobDetail({ jobId, role, onClose, onChanged }: { jobId: string; role: S
 }
 
 export function BoardView({ session }: { session: Session }) {
+  const access = useOperationalAccess();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [metrics, setMetrics] = useState<BoardMetrics | null>(null);
   const [services, setServices] = useState<Service[]>([]);
@@ -266,6 +270,7 @@ export function BoardView({ session }: { session: Session }) {
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(timer); }, []);
 
   async function advance(job: Job, to: JobStage) {
+    if (!access.canOperate) return;
     if (!canMoveStage(job.status as Stage, to as Stage) || to === 'HANDED_OVER') return;
     setBusyId(job.id); setError('');
     try { await post(`/jobs/${job.id}/advance`, { to }); await load(); setMobileStage(to); }
@@ -279,7 +284,7 @@ export function BoardView({ session }: { session: Session }) {
     if (job) void advance(job, stage);
   }
   return <div className="operations-page">
-    <div className="board-bar ops-board-bar"><button className="btn primary ops-checkin-button" onClick={() => setCheckInOpen(true)}><Plus size={18} />Check-in Vehicle</button><label className="ops-search"><Search size={18} /><input aria-label="Search active vehicles" placeholder="Search vehicle or customer" value={query} onChange={(event) => setQuery(event.target.value)} /></label>{session.user.role === 'OWNER' && branches.length > 1 && <select className="input ops-branch-filter" aria-label="Branch" value={branchId} onChange={(event) => setBranchId(event.target.value)}><option value="">All branches</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>}</div>
+    <div className="board-bar ops-board-bar"><button className="btn primary ops-checkin-button" disabled={!access.canCreateWork} onClick={() => setCheckInOpen(true)}><Plus size={18} />Check-in Vehicle</button><label className="ops-search"><Search size={18} /><input aria-label="Search active vehicles" placeholder="Search vehicle or customer" value={query} onChange={(event) => setQuery(event.target.value)} /></label>{session.user.role === 'OWNER' && branches.length > 1 && <select className="input ops-branch-filter" aria-label="Branch" value={branchId} onChange={(event) => setBranchId(event.target.value)}><option value="">All branches</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>}</div>
     {metrics && <div className="stat-strip ops-stats"><div className="stat"><span>In the bay</span><b>{metrics.inBay}</b></div><div className="stat is-ok"><span>Ready</span><b>{metrics.ready}</b></div><div className="stat is-bad"><span>Late</span><b>{metrics.late}</b></div>{session.user.role === 'OWNER' && <div className="stat is-money"><span>Collected today</span><b>{money(metrics.collectedPaise ?? 0)}</b></div>}</div>}
     <div className="seg ops-stage-tabs" role="tablist" aria-label="Board stages">{activeStages.map((stage) => <button key={stage} role="tab" aria-selected={mobileStage === stage} style={{ '--stage': stageTone[stage] } as React.CSSProperties} onClick={() => setMobileStage(stage)}><b>{jobs.filter((job) => job.status === stage).length}</b>{stageLabels[stage as Stage]}</button>)}</div>
     {error && <p className="portal-error" role="alert">{error}</p>}

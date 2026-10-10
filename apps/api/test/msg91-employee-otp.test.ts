@@ -1,3 +1,4 @@
+import { createPaidTestOrganization } from './paid-fixture.js';
 import { randomInt, randomUUID } from 'node:crypto';
 import { hash } from '@node-rs/argon2';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -31,7 +32,7 @@ let employeeId: string;
 const post = (url: string, payload: unknown, cookie?: string) => app.inject({ method: 'POST', url, headers: { origin: config.APP_ORIGIN, 'content-type': 'application/json', 'x-organization-slug': slug, ...(cookie ? { cookie } : {}) }, payload: JSON.stringify(payload) });
 
 beforeAll(async () => {
-  const org = await db.organization.create({ data: { name: 'OTP Test Wash', slug } });
+  const org = await createPaidTestOrganization(db, { data: { name: 'OTP Test Wash', slug } });
   orgId = org.id;
   const branch = await db.branch.create({ data: { organizationId: org.id, name: 'Main' } });
   await db.user.create({ data: { organizationId: org.id, branchId: branch.id, role: 'OWNER', name: 'Owner', username: 'otp-owner', passwordHash: await hash(password) } });

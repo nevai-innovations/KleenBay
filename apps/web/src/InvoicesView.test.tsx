@@ -41,6 +41,7 @@ describe('owner customer invoices', () => {
     const requests: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (path: string) => {
       requests.push(path);
+      if (path.endsWith('/entitlement')) return Response.json({ state: 'ACTIVE', daysRemaining: 365, canCreateWork: true, canOperate: true });
       if (path.endsWith('/auth/me')) return Response.json(owner);
       if (path.endsWith('/employees') || path.endsWith('/branches') || path.endsWith('/sale-items')) return Response.json([]);
       if (path.endsWith('/invoice-settings')) return Response.json({ gstRateBps: null, gstin: null, invoiceAddress: null, invoicePhone: null, allowCustomInvoiceItems: false, employeeAddons: false });
@@ -71,7 +72,8 @@ describe('owner customer invoices', () => {
   it('blocks employee direct invoice routes before invoice APIs load', async () => {
     window.history.replaceState(null, '', '/invoices/invoice-1/print');
     const requests: string[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (path: string) => { requests.push(path); if (path.endsWith('/auth/me')) return Response.json(employee); throw new Error(`Unexpected request: ${path}`); }));
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => { requests.push(path); if (path.endsWith('/entitlement')) return Response.json({ state: 'ACTIVE', daysRemaining: 365, canCreateWork: true, canOperate: true });
+      if (path.endsWith('/auth/me')) return Response.json(employee); throw new Error(`Unexpected request: ${path}`); }));
     render(<App />);
     expect(await screen.findByRole('heading', { name: 'Access denied' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Invoices' })).toBeNull();

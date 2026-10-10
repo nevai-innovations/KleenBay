@@ -5,6 +5,7 @@ import { buildApp } from '../src/app.js';
 import { getConfig } from '../src/config.js';
 import { createDb } from '../src/db.js';
 import { assertLocalTestDatabase } from '../src/database-target.js';
+import { createPaidTestOrganization } from './paid-fixture.js';
 import { dispatchMessage, Msg91WhatsAppProvider, type MessagingProvider } from '../src/messaging.js';
 import type { StorageProvider } from '../src/storage.js';
 import { createTrackingToken, readTrackingToken } from '../src/tracking.js';
@@ -71,7 +72,7 @@ function expectOperationalOnly(value: unknown) {
 }
 
 beforeAll(async () => {
-  const org = await db.organization.create({ data: { slug, name: 'Operations Test' } });
+  const org = await createPaidTestOrganization(db, { data: { slug, name: 'Operations Test' } });
   organizationId = org.id;
   branchId = (await db.branch.create({ data: { organizationId, name: 'Main' } })).id;
   serviceId = (await db.service.create({ data: { organizationId, name: 'Premium Wash', category: 'Wash', basePricePaise: 59900, estimatedMinutes: 45 } })).id;
@@ -248,7 +249,7 @@ describe('vehicle operations', () => {
   });
 
   it('does not expose another business message or retry endpoint', async () => {
-    const otherOrg = await db.organization.create({ data: { slug: `other-${randomUUID()}`, name: 'Other Business' } });
+    const otherOrg = await createPaidTestOrganization(db, { data: { slug: `other-${randomUUID()}`, name: 'Other Business' } });
     await db.user.create({ data: { organizationId: otherOrg.id, role: 'OWNER', name: 'Other Owner', username: 'other', passwordHash: await hash('other-password') } });
     const login = await app.inject({ method: 'POST', url: '/api/auth/owner/login', headers: { 'x-organization-slug': otherOrg.slug }, payload: { login: 'other', password: 'other-password' } });
     const cookie = `${login.cookies[0]!.name}=${login.cookies[0]!.value}`;
@@ -308,7 +309,7 @@ describe('vehicle operations', () => {
     const test = await request('POST', '/api/whatsapp/test-connection', {}, ownerCookie);
     expect(test.json()).toMatchObject({ delivered: false, status: 'MOCK_ACTIVE' });
 
-    const otherOrg = await db.organization.create({ data: { slug: `message-tenant-${randomUUID()}`, name: 'Second Wash' } });
+    const otherOrg = await createPaidTestOrganization(db, { data: { slug: `message-tenant-${randomUUID()}`, name: 'Second Wash' } });
     await db.user.create({ data: { organizationId: otherOrg.id, role: 'OWNER', name: 'Second Owner', username: 'second', passwordHash: await hash('other-password') } });
     const login = await app.inject({ method: 'POST', url: '/api/auth/owner/login', headers: { 'x-organization-slug': otherOrg.slug }, payload: { login: 'second', password: 'other-password' } });
     const otherCookie = `${login.cookies[0]!.name}=${login.cookies[0]!.value}`;
@@ -486,7 +487,7 @@ describe('vehicle operations', () => {
     await request('PATCH', '/api/operations/settings', { showCustomerTrackingLink: true }, ownerCookie);
     expect((await request('GET', `/api/public/tracking/${token}`)).statusCode).toBe(200);
 
-    const otherOrg = await db.organization.create({ data: { slug: `tracking-${randomUUID()}`, name: 'Other Wash' } });
+    const otherOrg = await createPaidTestOrganization(db, { data: { slug: `tracking-${randomUUID()}`, name: 'Other Wash' } });
     const otherOwner = await db.user.create({ data: { organizationId: otherOrg.id, role: 'OWNER', name: 'Other', username: 'tracking-owner', passwordHash: await hash('other-password') } });
     const otherLogin = await app.inject({ method: 'POST', url: '/api/auth/owner/login', headers: { 'x-organization-slug': otherOrg.slug }, payload: { login: 'tracking-owner', password: 'other-password' } });
     const otherCookie = `${otherLogin.cookies[0]!.name}=${otherLogin.cookies[0]!.value}`;

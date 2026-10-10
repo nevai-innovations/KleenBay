@@ -5,6 +5,7 @@ import { buildApp } from '../src/app.js';
 import { getConfig } from '../src/config.js';
 import { createDb } from '../src/db.js';
 import { assertLocalTestDatabase } from '../src/database-target.js';
+import { createPaidTestOrganization } from './paid-fixture.js';
 import { MockMessagingProvider } from '../src/messaging.js';
 import type { StorageProvider } from '../src/storage.js';
 
@@ -36,9 +37,9 @@ function checkIn(branchId?: string) {
 }
 
 beforeAll(async () => {
-  const org = await db.organization.create({ data: { slug, name: 'Branch Test' } });
+  const org = await createPaidTestOrganization(db, { data: { slug, name: 'Branch Test' } });
   organizationId = org.id;
-  const foreign = await db.organization.create({ data: { slug: foreignSlug, name: 'Other Business' } });
+  const foreign = await createPaidTestOrganization(db, { data: { slug: foreignSlug, name: 'Other Business' } });
   mainId = (await db.branch.create({ data: { organizationId, name: 'Main' } })).id;
   foreignId = (await db.branch.create({ data: { organizationId: foreign.id, name: 'Foreign' } })).id;
   serviceId = (await db.service.create({ data: { organizationId, name: 'Premium Wash', category: 'Wash', basePricePaise: 59900, estimatedMinutes: 45 } })).id;

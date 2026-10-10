@@ -5,6 +5,7 @@ import { buildApp } from '../src/app.js';
 import { getConfig } from '../src/config.js';
 import { createDb } from '../src/db.js';
 import { assertLocalTestDatabase } from '../src/database-target.js';
+import { createPaidTestOrganization } from './paid-fixture.js';
 import { calculateInvoice } from '../src/invoice-calculation.js';
 
 const db = createDb(assertLocalTestDatabase(process.env.TEST_DATABASE_URL));
@@ -27,13 +28,13 @@ async function createJob(plate: string) {
   return result.json().id as string;
 }
 beforeAll(async () => {
-  const org = await db.organization.create({ data: { slug, name: 'Invoice Test Wash' } });
+  const org = await createPaidTestOrganization(db, { data: { slug, name: 'Invoice Test Wash' } });
   orgId = org.id;
   branchId = (await db.branch.create({ data: { organizationId: orgId, name: 'Main', address: 'Test Road', phone: '9000000000' } })).id;
   serviceId = (await db.service.create({ data: { organizationId: orgId, name: 'Premium Wash', category: 'Wash', basePricePaise: 50000, estimatedMinutes: 40 } })).id;
   await db.user.create({ data: { organizationId: orgId, role: 'OWNER', name: 'Owner', username: `invoice-${randomUUID()}`, email: `invoice-${randomUUID()}@example.test`, passwordHash: await hash('test-password') } });
   await db.user.create({ data: { organizationId: orgId, branchId, role: 'EMPLOYEE', name: 'Worker', employee: { create: { mobile: `+91${employeeMobile}` } } } });
-  const other = await db.organization.create({ data: { slug: `invoice-other-${randomUUID()}`, name: 'Other Wash' } });
+  const other = await createPaidTestOrganization(db, { data: { slug: `invoice-other-${randomUUID()}`, name: 'Other Wash' } });
   await db.user.create({ data: { organizationId: other.id, role: 'OWNER', name: 'Other', email: `other-${randomUUID()}@example.test`, passwordHash: await hash('test-password') } });
   app = await buildApp(config, db);
   await app.ready();

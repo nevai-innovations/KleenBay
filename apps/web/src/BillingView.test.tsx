@@ -22,7 +22,7 @@ describe('owner Razorpay billing view', () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ...base, subscription: { status: 'ACTIVE', currentPeriodStart: '2026-10-10T00:00:00Z', currentPeriodEnd: '2027-10-10T00:00:00Z', daysRemaining: 365 }, payments: [{ id: 'p1', provider: 'RAZORPAY', razorpayPaymentId: 'pay_test', amountPaise: 720000, status: 'SUCCESS', initiatedAt: '2026-10-10T00:00:00Z', completedAt: '2026-10-10T00:00:00Z' }] })));
     render(<BillingView />); expect(await screen.findByText('365')).toBeTruthy(); expect(screen.getByRole('button', { name: 'Renew subscription' })).toBeTruthy(); expect(screen.getByText('Payment ID: pay_test')).toBeTruthy(); expect(screen.getByText('Success')).toBeTruthy(); expect(screen.getByText(/Razorpay/)).toBeTruthy();
   });
-  it.each([['EXPIRED', 'Expired', /Renew for/], ['PAYMENT_FAILED', 'Payment unsuccessful', /Try again/], ['PAYMENT_PENDING', 'Payment pending', /Subscribe for/]])('shows %s with the appropriate action', async (status, label, action) => {
+  it.each([['EXPIRED', 'Subscription expired', /Renew for/], ['PAYMENT_FAILED', 'Payment unsuccessful', /Try again/], ['PAYMENT_PENDING', 'Payment pending', /Subscribe for/]])('shows %s with the appropriate action', async (status, label, action) => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ...base, subscription: { ...base.subscription, status } })));
     render(<BillingView />); expect(await screen.findByText(label)).toBeTruthy(); expect(screen.getByRole('button', { name: action })).toBeTruthy();
   });

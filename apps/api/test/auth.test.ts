@@ -5,6 +5,7 @@ import { buildApp } from '../src/app.js';
 import { getConfig } from '../src/config.js';
 import { createDb } from '../src/db.js';
 import { assertLocalTestDatabase } from '../src/database-target.js';
+import { createPaidTestOrganization } from './paid-fixture.js';
 
 const config = { ...getConfig(), NODE_ENV: 'test' as const, devOtp: true, DEV_OTP_ENABLED: 'true' as const, DEV_OTP_FIXED_CODE: '123456', LOG_LEVEL: 'silent' };
 const testUrl = assertLocalTestDatabase(process.env.TEST_DATABASE_URL);
@@ -24,7 +25,7 @@ const origin = config.APP_ORIGIN;
 const post = (url: string, payload: unknown, cookie?: string, org = slug) => app.inject({ method: 'POST', url, headers: { origin, 'content-type': 'application/json', 'x-organization-slug': org, ...(cookie ? { cookie } : {}) }, payload: JSON.stringify(payload) });
 
 beforeAll(async () => {
-  const organization = await db.organization.create({ data: { name: 'Test Car Wash', slug } });
+  const organization = await createPaidTestOrganization(db, { data: { name: 'Test Car Wash', slug } });
   organizationId = organization.id;
   const branch = await db.branch.create({ data: { organizationId: organization.id, name: 'Main' } });
   branchId = branch.id;
@@ -79,7 +80,7 @@ describe('M1 authentication and tenant boundaries', () => {
   it('blocks employee management and cross-tenant branch assignment', async () => {
     const forbidden = await app.inject({ method: 'GET', url: '/api/employees', headers: { cookie: employeeCookie } });
     expect(forbidden.statusCode).toBe(403);
-    const other = await db.organization.create({ data: { slug: `other-${randomUUID()}`, name: 'Other Wash' } });
+    const other = await createPaidTestOrganization(db, { data: { slug: `other-${randomUUID()}`, name: 'Other Wash' } });
     const foreign = await db.branch.create({ data: { organizationId: other.id, name: 'Other Branch' } });
     const result = await post('/api/employees', { name: 'Bad Branch', mobile: '9876543213', branchId: foreign.id }, ownerCookie);
     expect(result.statusCode).toBe(404);

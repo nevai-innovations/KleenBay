@@ -1,3 +1,4 @@
+import { createPaidTestOrganization } from './paid-fixture.js';
 import { randomInt, randomUUID } from 'node:crypto';
 import { hash } from '@node-rs/argon2';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -49,7 +50,7 @@ describe('public stage dummy OTP', () => {
     expect(otpConfig.json()).toEqual({ provider: 'dummy', otpLength: 6 });
     expect(otpConfig.body).not.toContain('123456');
     for (const index of [0, 1]) {
-      const organization = await db.organization.create({ data: { slug: `stage-dummy-${prefix}-${index}`, name: `Stage Dummy ${index}` } });
+      const organization = await createPaidTestOrganization(db, { data: { slug: `stage-dummy-${prefix}-${index}`, name: `Stage Dummy ${index}` } });
       const branch = await db.branch.create({ data: { organizationId: organization.id, name: 'Main' } });
       const email = `stage-dummy-${prefix}-${index}@example.test`;
       await db.user.create({ data: { organizationId: organization.id, branchId: branch.id, role: 'OWNER', name: `Owner ${index}`, email, passwordHash: await hash(password) } });
