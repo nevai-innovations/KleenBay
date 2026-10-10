@@ -23,7 +23,7 @@ import { registerDailySummaryRoutes } from './daily-summary.js';
 import { registerOwnerAccountRoutes } from './owner-accounts.js';
 import { registerWhatsAppSettingsRoutes } from './whatsapp-settings.js';
 import { createStorageProvider, LocalStorageProvider, type StorageProvider } from './storage.js';
-import { createPaymentProvider, type PaymentProvider } from './payu.js';
+import { createPaymentProvider, type PaymentProvider } from './razorpay.js';
 import { registerBillingRoutes } from './billing.js';
 import { registerInvoiceRoutes } from './invoices.js';
 import { registerBranchRoutes } from './branches.js';

@@ -219,16 +219,17 @@ browser sample data and is not a replacement for the API-driven app.
 ### Annual subscription billing
 
 Billing is owner-only and belongs to the signed-in organization. The server sets
-the single KleenBay Annual plan at INR 7,200; PayU test checkout remains unavailable
-until `PAYU_MERCHANT_KEY`, `PAYU_MERCHANT_SALT`, and
-`PAYU_BASE_URL=https://test.payu.in` are configured in the untracked `.env` or
-stage secret. Never use live PayU credentials locally or in stage. Successful
-payments activate a subscription only after server-side PayU verification. Run
+the single KleenBay Annual plan at INR 7,200 (720000 paise). Configure
+`RAZORPAY_ENV=test`, `RAZORPAY_KEY_ID`, and `RAZORPAY_KEY_SECRET` in the untracked
+`.env` to exercise test checkout. Public stage also requires the separate
+`RAZORPAY_WEBHOOK_SECRET`, stored with the test keys in a Kubernetes Secret.
+Never use live Razorpay credentials locally or in stage. Successful payments
+activate a subscription only after server signature and captured-payment verification. Run
 `pnpm --filter @carwash/api db:deploy` for the subscription migrations.
 
 The linked policy pages are placeholders pending legal approval. Production
 checkout requires the final policies and `BILLING_POLICIES_APPROVED=true`; leave
-that flag false until the approved copy is published. PayU secrets must never go
+that flag false until the approved copy is published. Razorpay secrets must never go
 in Git, frontend environment variables, or docs.
 
 Run `pnpm verify` for lint, typecheck, tests and builds. Tests require the separate

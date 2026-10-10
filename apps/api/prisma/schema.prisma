@@ -200,7 +200,10 @@ model SubscriptionPayment {
   id                    String                    @id @default(cuid())
   organizationId        String
   subscriptionId        String
-  provider              String                    @default("PAYU")
+  provider              String                    @default("RAZORPAY")
+  razorpayOrderId       String?                   @unique
+  razorpayPaymentId     String?                   @unique
+  checkoutKey           String?
   merchantTransactionId String                    @unique
   providerTransactionId String?                   @unique
   amountPaise           Int
@@ -208,6 +211,7 @@ model SubscriptionPayment {
   status                SubscriptionPaymentStatus @default(INITIATED)
   initiatedAt           DateTime                  @default(now())
   completedAt           DateTime?
+  failedAt              DateTime?
   failureReason         String?
   providerStatus        String?
   createdAt             DateTime                  @default(now())
@@ -216,6 +220,7 @@ model SubscriptionPayment {
   subscription          Subscription              @relation(fields: [subscriptionId, organizationId], references: [id, organizationId])
 
   @@unique([id, organizationId])
+  @@unique([organizationId, checkoutKey])
   @@index([organizationId, initiatedAt])
   @@index([organizationId, status])
   @@index([subscriptionId, organizationId])

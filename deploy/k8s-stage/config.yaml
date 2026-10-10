@@ -10,7 +10,11 @@ data:
   OTP_PROVIDER: DUMMY_OTP
   DUMMY_OTP: "123456"
   MESSAGING_PROVIDER: mock
-  STORAGE_PROVIDER: local
+  RAZORPAY_ENV: test
+  STORAGE_PROVIDER: s3
+  S3_BUCKET: kleenbay-stage-uploads-208519604276
+  S3_REGION: us-east-1
+  AWS_EC2_METADATA_DISABLED: "true"
   MOCK_MESSAGING_FAIL: "false"
   APP_ORIGIN: https://stage.kleenbay.com
   COOKIE_SECURE: "true"

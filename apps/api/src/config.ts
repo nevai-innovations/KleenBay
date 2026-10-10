@@ -35,9 +35,10 @@ const schema = z.object({
   MSG91_WIDGET_ID: z.string().min(1).optional(),
   MSG91_WIDGET_TOKEN: z.string().min(1).optional(),
   MSG91_WIDGET_OTP_LENGTH: z.coerce.number().int().min(4).max(8).default(6),
-  PAYU_MERCHANT_KEY: z.string().min(1).optional(),
-  PAYU_MERCHANT_SALT: z.string().min(1).optional(),
-  PAYU_BASE_URL: z.enum(['https://test.payu.in', 'https://secure.payu.in']).optional(),
+  RAZORPAY_KEY_ID: z.string().regex(/^rzp_(test|live)_[A-Za-z0-9]+$/).optional(),
+  RAZORPAY_KEY_SECRET: z.string().min(1).optional(),
+  RAZORPAY_WEBHOOK_SECRET: z.string().min(16).optional(),
+  RAZORPAY_ENV: z.enum(['test', 'live']).default('test'),
   BILLING_POLICIES_APPROVED: z.enum(['true', 'false']).default('false'),
   OTP_TTL_MINUTES: z.coerce.number().int().min(1).max(15).default(5),
   OTP_RESEND_SECONDS: z.coerce.number().int().min(15).max(300).default(60),
@@ -64,14 +65,17 @@ export function getConfig() {
       throw new Error('Production requires HTTPS origin and secure cookies');
     }
   }
-  const payuConfigured = Boolean(env.PAYU_MERCHANT_KEY && env.PAYU_MERCHANT_SALT && env.PAYU_BASE_URL);
-  if (!payuConfigured && (env.PAYU_MERCHANT_KEY || env.PAYU_MERCHANT_SALT || env.PAYU_BASE_URL)) throw new Error('PayU requires merchant key, salt and base URL together');
-  if (payuConfigured) {
-    if (env.STAGING_MODE === 'true' && env.PAYU_BASE_URL !== 'https://test.payu.in') throw new Error('Stage PayU must use the test environment');
-    if (env.NODE_ENV !== 'production' && env.PAYU_BASE_URL !== 'https://test.payu.in') throw new Error('Local PayU must use the test environment');
-    if (env.NODE_ENV === 'production' && env.STAGING_MODE !== 'true' && env.PAYU_BASE_URL !== 'https://secure.payu.in') throw new Error('Production PayU must use the live environment');
-    if (env.NODE_ENV === 'production' && env.STAGING_MODE !== 'true' && env.BILLING_POLICIES_APPROVED !== 'true') throw new Error('Live PayU requires approved billing policies');
+  const razorpayConfigured = Boolean(env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET);
+  if (!razorpayConfigured && (env.RAZORPAY_KEY_ID || env.RAZORPAY_KEY_SECRET || env.RAZORPAY_WEBHOOK_SECRET)) throw new Error('Razorpay requires key ID and key secret together');
+  if (env.STAGING_MODE === 'true' || env.NODE_ENV !== 'production') {
+    if (env.RAZORPAY_ENV !== 'test' || env.RAZORPAY_KEY_ID?.startsWith('rzp_live_')) throw new Error('Stage and local Razorpay must use test mode');
   }
+  if (razorpayConfigured) {
+    if (!env.RAZORPAY_KEY_ID!.startsWith(`rzp_${env.RAZORPAY_ENV}_`)) throw new Error('Razorpay key does not match configured environment');
+    if (env.RAZORPAY_ENV === 'live' && env.BILLING_POLICIES_APPROVED !== 'true') throw new Error('Live Razorpay requires approved billing policies');
+    if (env.NODE_ENV === 'production' && !env.RAZORPAY_WEBHOOK_SECRET) throw new Error('Public Razorpay requires a webhook secret');
+  }
+  if (['PAYU_MERCHANT_KEY', 'PAYU_MERCHANT_SALT', 'PAYU_BASE_URL'].some((key) => process.env[key] !== undefined)) throw new Error('PayU is no longer supported; configure Razorpay');
   if (env.NODE_ENV === 'production' && env.STAGING_MODE !== 'true' && env.STORAGE_PROVIDER !== 's3') throw new Error('Production requires S3 storage');
   if (env.STORAGE_PROVIDER === 's3' && (!env.S3_BUCKET || !env.S3_REGION)) throw new Error('S3 storage requires S3_BUCKET and S3_REGION');
   let whatsAppKeys: Record<string, string> = {};
@@ -105,7 +109,7 @@ export function getConfig() {
     otpMode: msg91Otp ? 'msg91' as const : dummyOtp ? 'dummy' as const : env.NODE_ENV !== 'production' && env.DEV_OTP_ENABLED === 'true' ? 'development' as const : 'unconfigured' as const,
     stagingMode: env.STAGING_MODE === 'true',
     whatsAppKeys,
-    payuConfigured,
+    razorpayConfigured,
   };
 }
 

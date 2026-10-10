@@ -30,6 +30,7 @@ spec:
         kleenbay.com/source-revision: ef48db25a275f2e2e9655a2b3da09a2af80eed7c
     spec:
       automountServiceAccountToken: false
+      serviceAccountName: kleenbay-stage-api
       securityContext:
         runAsUser: 1000
         runAsGroup: 1000
@@ -44,6 +45,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: kleenbay-stage-config
+            - secretRef:
+                name: kleenbay-stage-razorpay
           env:
             - name: POD_NAMESPACE
               valueFrom:

@@ -125,24 +125,28 @@ describe('public staging safeguards', () => {
     expect(() => getConfig()).toThrow('Staging mode requires production runtime settings');
   });
 
-  it('accepts only sandbox PayU credentials on stage', () => {
-    vi.stubEnv('PAYU_MERCHANT_KEY', 'test-key');
-    expect(() => getConfig()).toThrow('PayU requires merchant key, salt and base URL together');
-    vi.stubEnv('PAYU_MERCHANT_SALT', 'test-salt');
-    vi.stubEnv('PAYU_BASE_URL', 'https://secure.payu.in');
-    expect(() => getConfig()).toThrow('Stage PayU must use the test environment');
-    vi.stubEnv('PAYU_BASE_URL', 'https://test.payu.in');
-    expect(getConfig().payuConfigured).toBe(true);
+  it('accepts only test Razorpay credentials on stage and requires a webhook secret', () => {
+    vi.stubEnv('RAZORPAY_KEY_ID', 'rzp_test_local');
+    expect(() => getConfig()).toThrow('Razorpay requires key ID and key secret together');
+    vi.stubEnv('RAZORPAY_KEY_SECRET', 'test-secret');
+    expect(() => getConfig()).toThrow('Public Razorpay requires a webhook secret');
+    vi.stubEnv('RAZORPAY_WEBHOOK_SECRET', 'test-webhook-secret-long');
+    expect(getConfig().razorpayConfigured).toBe(true);
+    vi.stubEnv('RAZORPAY_ENV', 'live');
+    expect(() => getConfig()).toThrow('must use test mode');
+    vi.stubEnv('RAZORPAY_ENV', 'test');
+    vi.stubEnv('RAZORPAY_KEY_ID', 'rzp_live_forbidden');
+    expect(() => getConfig()).toThrow('must use test mode');
   });
 
-  it('requires approved policies before live PayU can be enabled', () => {
+  it('requires approved policies before live Razorpay can be enabled', () => {
     vi.stubEnv('DATABASE_URL', 'postgresql://prod:secret@localhost:5432/kleenbay');
     vi.stubEnv('EXPECTED_DATABASE_NAME', 'kleenbay');
     vi.stubEnv('APP_ORIGIN', 'https://kleenbay.com');
     vi.stubEnv('STAGING_MODE', 'false');
-    vi.stubEnv('PAYU_MERCHANT_KEY', 'live-key');
-    vi.stubEnv('PAYU_MERCHANT_SALT', 'live-salt');
-    vi.stubEnv('PAYU_BASE_URL', 'https://secure.payu.in');
-    expect(() => getConfig()).toThrow('Live PayU requires approved billing policies');
+    vi.stubEnv('RAZORPAY_KEY_ID', 'rzp_live_local');
+    vi.stubEnv('RAZORPAY_KEY_SECRET', 'live-secret');
+    vi.stubEnv('RAZORPAY_ENV', 'live');
+    expect(() => getConfig()).toThrow('Live Razorpay requires approved billing policies');
   });
 });
